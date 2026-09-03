@@ -286,7 +286,7 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Understanding speech", state: speechStageState)
                     Divider().overlay(LPTheme.border)
-                    ProcessingStageRow(title: "Translating", state: .pending)
+                    ProcessingStageRow(title: "Translating", state: translationStageState)
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Creating Vietnamese voice", state: .pending)
                     Divider().overlay(LPTheme.border)
@@ -315,6 +315,27 @@ struct ProcessingView: View {
                     .lpCard()
                 }
 
+                if case .completed(let translation) = model.translationState {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Vietnamese translation", systemImage: "character.bubble.fill")
+                                .font(.headline)
+                                .foregroundStyle(LPTheme.accent)
+                            Spacer()
+                            Text("\(translation.segments.count) segments")
+                                .font(.caption2.bold())
+                                .foregroundStyle(LPTheme.cyan)
+                        }
+                        Text(translation.translatedText)
+                            .font(.subheadline)
+                            .lineLimit(5)
+                        Text("Only transcript JSON was sent · source media stayed on-device")
+                            .font(.caption2)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .lpCard()
+                }
+
                 Label("Processing is designed to continue locally while the app remains active. Background execution is a Plus capability in the product roadmap.", systemImage: "iphone.gen3")
                     .font(.caption)
                     .foregroundStyle(LPTheme.secondaryText)
@@ -322,6 +343,13 @@ struct ProcessingView: View {
 
                 if case .modelMissing = model.asrState {
                     Text("Speech model is not installed. LingoPlay will not download a large model without an explicit model-install action.")
+                        .font(.caption)
+                        .foregroundStyle(LPTheme.secondaryText)
+                        .lpCard()
+                }
+
+                if case .endpointMissing = model.translationState {
+                    Text("Translation backend is not configured. The recognized transcript remains local and no network request was made.")
                         .font(.caption)
                         .foregroundStyle(LPTheme.secondaryText)
                         .lpCard()
@@ -335,6 +363,13 @@ struct ProcessingView: View {
                 }
 
                 if case .failed(let message) = model.asrState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lpCard()
+                }
+
+                if case .failed(let message) = model.translationState {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -356,7 +391,14 @@ struct ProcessingView: View {
             case .modelMissing: return "Audio ready · speech model not installed"
             case .loadingModel: return "Loading local speech model"
             case .transcribing: return "Understanding speech on-device"
-            case .completed: return "Speech recognized locally"
+            case .completed:
+                switch model.translationState {
+                case .translating: return "Translating transcript"
+                case .completed: return "Vietnamese translation ready"
+                case .endpointMissing: return "Speech ready · translation not configured"
+                case .failed: return "Translation stopped"
+                case .idle: return "Speech recognized locally"
+                }
             case .failed: return "Speech recognition stopped"
             case .idle: return "Audio ready"
             }
@@ -385,6 +427,16 @@ struct ProcessingView: View {
         case .idle: .pending
         }
     }
+
+    private var translationStageState: ProcessingStageRow.State {
+        switch model.translationState {
+        case .endpointMissing: .configurationMissing
+        case .translating: .active
+        case .completed: .complete
+        case .failed: .failed
+        case .idle: .pending
+        }
+    }
 }
 
 private struct ProcessingStageRow: View {
@@ -393,6 +445,7 @@ private struct ProcessingStageRow: View {
         case active
         case pending
         case blocked
+        case configurationMissing
         case failed
     }
 
@@ -410,14 +463,14 @@ private struct ProcessingStageRow: View {
                         .tint(LPTheme.cyan)
                 case .pending:
                     Image(systemName: "circle")
-                case .blocked:
+                case .blocked, .configurationMissing:
                     Image(systemName: "lock.circle")
                 case .failed:
                     Image(systemName: "exclamationmark.circle.fill")
                 }
             }
             .frame(width: 24)
-            .foregroundStyle((state == .pending || state == .blocked) ? LPTheme.secondaryText : (state == .failed ? .red : LPTheme.cyan))
+            .foregroundStyle((state == .pending || state == .blocked || state == .configurationMissing) ? LPTheme.secondaryText : (state == .failed ? .red : LPTheme.cyan))
 
             Text(title)
                 .font(.subheadline.weight(.medium))
@@ -435,6 +488,7 @@ private struct ProcessingStageRow: View {
         case .active: "In progress"
         case .pending: "Pending"
         case .blocked: "ASR not installed"
+        case .configurationMissing: "Not configured"
         case .failed: "Failed"
         }
     }

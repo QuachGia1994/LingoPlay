@@ -87,8 +87,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER }
 private enum class Tab { HOME, LIBRARY, OFFLINE, SETTINGS }
@@ -121,6 +123,11 @@ fun LingoPlayApp() {
     var asrPhaseName by rememberSaveable { mutableStateOf(ASRPhase.IDLE.name) }
     var asrTranscript by remember { mutableStateOf<ASRTranscript?>(null) }
     var asrError by rememberSaveable { mutableStateOf<String?>(null) }
+    var translationPhaseName by rememberSaveable { mutableStateOf(TranslationPhase.IDLE.name) }
+    var translationDocument by remember { mutableStateOf<TranslationDocument?>(null) }
+    var translationError by rememberSaveable { mutableStateOf<String?>(null) }
+    var translationBatch by rememberSaveable { mutableStateOf(0) }
+    var translationBatchTotal by rememberSaveable { mutableStateOf(0) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -128,6 +135,7 @@ fun LingoPlayApp() {
     val tab = Tab.valueOf(tabName)
     val preparationState = MediaPreparationState.valueOf(mediaState)
     val asrPhase = ASRPhase.valueOf(asrPhaseName)
+    val translationPhase = TranslationPhase.valueOf(translationPhaseName)
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -139,6 +147,11 @@ fun LingoPlayApp() {
         asrPhaseName = ASRPhase.IDLE.name
         asrTranscript = null
         asrError = null
+        translationPhaseName = TranslationPhase.IDLE.name
+        translationDocument = null
+        translationError = null
+        translationBatch = 0
+        translationBatchTotal = 0
         scope.launch {
             try {
                 selectedMedia = LocalMediaRepository.inspect(context, uri)
@@ -175,14 +188,31 @@ fun LingoPlayApp() {
                     asrPhaseName = ASRPhase.TRANSCRIBING.name
                     asrTranscript = SherpaWhisperSpeechRecognizer.transcribe(context, audioFile, model)
                     asrPhaseName = ASRPhase.COMPLETED.name
+                    val transcript = asrTranscript ?: error("Speech transcript was not retained.")
+                    if (BuildConfig.TRANSLATION_API_BASE_URL.isBlank()) {
+                        translationPhaseName = TranslationPhase.ENDPOINT_MISSING.name
+                    } else {
+                        translationPhaseName = TranslationPhase.TRANSLATING.name
+                        translationError = null
+                        translationDocument = TranslationService.translate(transcript) { batch, total ->
+                            withContext(Dispatchers.Main.immediate) {
+                                translationBatch = batch
+                                translationBatchTotal = total
+                            }
+                        }
+                        translationPhaseName = TranslationPhase.COMPLETED.name
+                    }
                 }
             } catch (error: Throwable) {
                 if (mediaState == MediaPreparationState.EXTRACTING_AUDIO.name) {
                     mediaState = MediaPreparationState.FAILED.name
                     mediaError = error.message ?: "Audio preparation failed."
-                } else {
+                } else if (asrPhaseName != ASRPhase.COMPLETED.name) {
                     asrPhaseName = ASRPhase.FAILED.name
                     asrError = error.message ?: "Speech recognition failed."
+                } else {
+                    translationPhaseName = TranslationPhase.FAILED.name
+                    translationError = error.message ?: "Translation failed."
                 }
             }
         }
@@ -229,6 +259,11 @@ fun LingoPlayApp() {
                         asrPhase = asrPhase,
                         transcript = asrTranscript,
                         asrError = asrError,
+                        translationPhase = translationPhase,
+                        translation = translationDocument,
+                        translationError = translationError,
+                        translationBatch = translationBatch,
+                        translationBatchTotal = translationBatchTotal,
                         onBack = { stageName = Stage.HOME.name },
                     )
 
@@ -376,7 +411,19 @@ private fun PrepareScreen(media: LocalMediaItem?, onBack: () -> Unit, onEdit: ()
 }
 
 @Composable
-private fun ProcessingScreen(mediaState: MediaPreparationState, mediaError: String?, asrPhase: ASRPhase, transcript: ASRTranscript?, asrError: String?, onBack: () -> Unit) {
+private fun ProcessingScreen(
+    mediaState: MediaPreparationState,
+    mediaError: String?,
+    asrPhase: ASRPhase,
+    transcript: ASRTranscript?,
+    asrError: String?,
+    translationPhase: TranslationPhase,
+    translation: TranslationDocument?,
+    translationError: String?,
+    translationBatch: Int,
+    translationBatchTotal: Int,
+    onBack: () -> Unit,
+) {
     ScreenScroll {
         ScreenHeader("AI Processing", onBack)
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -384,11 +431,13 @@ private fun ProcessingScreen(mediaState: MediaPreparationState, mediaError: Stri
         }
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             val progress = when {
+                translationPhase == TranslationPhase.COMPLETED -> 0.60f
+                translationPhase == TranslationPhase.TRANSLATING && translationBatchTotal > 0 -> 0.40f + (0.20f * translationBatch.toFloat() / translationBatchTotal.toFloat())
                 asrPhase == ASRPhase.COMPLETED -> 0.40f
                 mediaState == MediaPreparationState.AUDIO_READY -> 0.20f
                 else -> 0.05f
             }
-            Text(processingTitle(mediaState, asrPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(processingTitle(mediaState, asrPhase, translationPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("${(progress * 100).toInt()}%", color = LpCyan, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             LinearProgressIndicator(
                 progress = { progress },
@@ -403,7 +452,7 @@ private fun ProcessingScreen(mediaState: MediaPreparationState, mediaError: Stri
             CardDivider()
             ProcessingRow("Understanding speech", speechProcessState(asrPhase))
             CardDivider()
-            ProcessingRow("Translating", ProcessState.PENDING)
+            ProcessingRow("Translating", translationProcessState(translationPhase))
             CardDivider()
             ProcessingRow("Creating Vietnamese voice", ProcessState.PENDING)
             CardDivider()
@@ -422,9 +471,27 @@ private fun ProcessingScreen(mediaState: MediaPreparationState, mediaError: Stri
             }
         }
 
+        if (translation != null && translationPhase == TranslationPhase.COMPLETED) {
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Vietnamese translation", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("${translation.segments.size} segments", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(translation.translatedText, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                Text("Only transcript JSON was sent · source media stayed on-device", color = LpSecondaryText, fontSize = 10.sp)
+            }
+        }
+
         if (asrPhase == ASRPhase.MODEL_MISSING) {
             LpCard {
                 Text("Speech model is not installed. LingoPlay will not download a large model without an explicit model-install action.", color = LpSecondaryText, fontSize = 12.sp)
+            }
+        }
+
+        if (translationPhase == TranslationPhase.ENDPOINT_MISSING) {
+            LpCard {
+                Text("Translation backend is not configured. The recognized transcript remains local and no network request was made.", color = LpSecondaryText, fontSize = 12.sp)
             }
         }
 
@@ -441,16 +508,25 @@ private fun ProcessingScreen(mediaState: MediaPreparationState, mediaError: Stri
         asrError?.let { error ->
             LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
+        translationError?.let { error ->
+            LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
     }
 }
 
-private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase): String = when (mediaState) {
+private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase): String = when (mediaState) {
     MediaPreparationState.EXTRACTING_AUDIO -> "Preparing local audio"
     MediaPreparationState.AUDIO_READY -> when (asrPhase) {
         ASRPhase.MODEL_MISSING -> "Audio ready · speech model not installed"
         ASRPhase.LOADING_MODEL -> "Loading local speech model"
         ASRPhase.TRANSCRIBING -> "Understanding speech on-device"
-        ASRPhase.COMPLETED -> "Speech recognized locally"
+        ASRPhase.COMPLETED -> when (translationPhase) {
+            TranslationPhase.TRANSLATING -> "Translating transcript"
+            TranslationPhase.COMPLETED -> "Vietnamese translation ready"
+            TranslationPhase.ENDPOINT_MISSING -> "Speech ready · translation not configured"
+            TranslationPhase.FAILED -> "Translation stopped"
+            else -> "Speech recognized locally"
+        }
         ASRPhase.FAILED -> "Speech recognition stopped"
         ASRPhase.IDLE -> "Audio ready"
     }
@@ -471,6 +547,14 @@ private fun speechProcessState(state: ASRPhase): ProcessState = when (state) {
     ASRPhase.COMPLETED -> ProcessState.COMPLETE
     ASRPhase.FAILED -> ProcessState.FAILED
     ASRPhase.IDLE -> ProcessState.PENDING
+}
+
+private fun translationProcessState(state: TranslationPhase): ProcessState = when (state) {
+    TranslationPhase.TRANSLATING -> ProcessState.ACTIVE
+    TranslationPhase.COMPLETED -> ProcessState.COMPLETE
+    TranslationPhase.ENDPOINT_MISSING -> ProcessState.CONFIGURATION_MISSING
+    TranslationPhase.FAILED -> ProcessState.FAILED
+    TranslationPhase.IDLE -> ProcessState.PENDING
 }
 
 @Composable
@@ -775,7 +859,7 @@ private fun PrepareRow(icon: ImageVector, title: String, value: String, detail: 
     }
 }
 
-private enum class ProcessState { COMPLETE, ACTIVE, PENDING, BLOCKED, FAILED }
+private enum class ProcessState { COMPLETE, ACTIVE, PENDING, BLOCKED, CONFIGURATION_MISSING, FAILED }
 
 @Composable
 private fun ProcessingRow(title: String, state: ProcessState) {
@@ -784,7 +868,7 @@ private fun ProcessingRow(title: String, state: ProcessState) {
             ProcessState.COMPLETE -> Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = LpCyan, modifier = Modifier.size(22.dp))
             ProcessState.ACTIVE -> Box(modifier = Modifier.size(22.dp).border(2.dp, LpCyan, CircleShape))
             ProcessState.PENDING -> Icon(Icons.Rounded.RadioButtonUnchecked, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
-            ProcessState.BLOCKED -> Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
+            ProcessState.BLOCKED, ProcessState.CONFIGURATION_MISSING -> Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
             ProcessState.FAILED -> Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(12.dp))
@@ -795,6 +879,7 @@ private fun ProcessingRow(title: String, state: ProcessState) {
                 ProcessState.ACTIVE -> "In progress"
                 ProcessState.PENDING -> "Pending"
                 ProcessState.BLOCKED -> "ASR not installed"
+                ProcessState.CONFIGURATION_MISSING -> "Not configured"
                 ProcessState.FAILED -> "Failed"
             },
             color = LpSecondaryText,

@@ -53,6 +53,81 @@ test("translation fails explicitly when provider secrets are absent", async () =
   assert.deepEqual(await response.json(), { error: "provider_not_configured" });
 });
 
+test("translation proxy forwards transcript JSON only and preserves ids", async () => {
+  const originalFetch = globalThis.fetch;
+  let providerBody: unknown;
+  globalThis.fetch = async (_input, init) => {
+    providerBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      translations: [
+        { id: "s1", text: "Xin chào thế giới" },
+        { id: "s2", text: "Đây là LingoPlay" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceLanguage: "und",
+        targetLanguage: "vi",
+        segments: [
+          { id: "s1", startMs: 0, endMs: 1400, text: "Hello world" },
+          { id: "s2", startMs: 1400, endMs: 3100, text: "This is LingoPlay" },
+        ],
+      }),
+    }), {
+      TRANSLATION_PROVIDER_URL: "https://provider.test/translate",
+      TRANSLATION_PROVIDER_KEY: "test-only",
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json() as { sourceLanguage: string; targetLanguage: string; translations: Array<{ id: string; text: string }> };
+    assert.equal(body.sourceLanguage, "und");
+    assert.equal(body.targetLanguage, "vi");
+    assert.deepEqual(body.translations.map((item) => item.id), ["s1", "s2"]);
+    assert.deepEqual(providerBody, {
+      sourceLanguage: "und",
+      targetLanguage: "vi",
+      segments: [
+        { id: "s1", startMs: 0, endMs: 1400, text: "Hello world" },
+        { id: "s2", startMs: 1400, endMs: 3100, text: "This is LingoPlay" },
+      ],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("invalid provider response is rejected instead of fabricating translation", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ translations: [] }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+  try {
+    const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceLanguage: "en",
+        targetLanguage: "vi",
+        segments: [{ id: "s1", startMs: 0, endMs: 2200, text: "Hello world" }],
+      }),
+    }), {
+      TRANSLATION_PROVIDER_URL: "https://provider.test/translate",
+      TRANSLATION_PROVIDER_KEY: "test-only",
+    });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "provider_invalid_shape" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("entitlements expose a minimal free capability set", async () => {
   const response = await handleRequest(new Request("https://lingoplay.test/v1/entitlements"));
   assert.equal(response.status, 200);

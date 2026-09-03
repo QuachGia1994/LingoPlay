@@ -13,6 +13,8 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.0.0"
+        val translationApiBaseUrl = providers.gradleProperty("LINGOPLAY_TRANSLATION_API_BASE_URL").orNull.orEmpty()
+        buildConfigField("String", "TRANSLATION_API_BASE_URL", "\"${translationApiBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -30,6 +32,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

@@ -57,10 +57,12 @@ final class AppModel {
     var selectedMedia: LocalMediaItem?
     var mediaState: MediaPreparationState = .idle
     var asrState: ASRState = .idle
+    var translationState: TranslationState = .idle
 
     private let mediaService = LocalMediaService()
     private let asrModelStore = ASRModelStore()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
+    private let translationService = TranslationService()
 
     let recentVideos = [
         RecentVideo(title: "The Future of AI", duration: "01:24:32", languagePair: "EN → VI"),
@@ -79,6 +81,9 @@ final class AppModel {
 
     func importMedia(from url: URL) async {
         mediaState = .importing
+        asrState = .idle
+        translationState = .idle
+        processingProgress = 0
         do {
             selectedMedia = try await mediaService.importMedia(from: url)
             mediaState = .ready
@@ -94,6 +99,8 @@ final class AppModel {
             return
         }
         processingProgress = 0
+        asrState = .idle
+        translationState = .idle
         stage = .processing
         Task { await prepareAudio() }
     }
@@ -122,9 +129,39 @@ final class AppModel {
             let transcript = try await speechRecognizer.transcribe(audioURL: audioURL, modelFolder: modelFolder)
             asrState = .completed(transcript)
             processingProgress = 0.4
+            await translateTranscript(transcript)
         } catch {
             asrState = .failed(error.localizedDescription)
         }
+    }
+
+    private func translateTranscript(_ transcript: ASRTranscript) async {
+        guard let endpoint = translationEndpoint() else {
+            translationState = .endpointMissing
+            return
+        }
+
+        do {
+            let document = try await translationService.translate(
+                transcript: transcript,
+                targetLanguage: "vi",
+                endpoint: endpoint
+            ) { [weak self] batch, total in
+                self?.translationState = .translating(batch: batch, totalBatches: total)
+                let ratio = total > 0 ? Double(batch) / Double(total) : 0
+                self?.processingProgress = 0.4 + (0.2 * ratio)
+            }
+            translationState = .completed(document)
+            processingProgress = 0.6
+        } catch {
+            translationState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func translationEndpoint() -> URL? {
+        let configured = Bundle.main.object(forInfoDictionaryKey: "LingoPlayTranslationAPIBaseURL") as? String
+        guard let configured, !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: configured)
     }
 
     func previewResult() {
