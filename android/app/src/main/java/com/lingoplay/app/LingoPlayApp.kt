@@ -28,7 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -689,7 +689,7 @@ private fun ScreenHeader(title: String, onBack: () -> Unit, trailing: @Composabl
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Surface(modifier = Modifier.size(38.dp).clickable(onClick = onBack), color = LpSurface, shape = CircleShape) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
             }
         }
         Spacer(Modifier.weight(1f))
@@ -733,7 +733,7 @@ private fun RecentVideoRow(video: DemoVideo, action: () -> Unit) {
                 Text(video.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${video.duration}  •  ${video.languagePair}", color = LpSecondaryText, fontSize = 11.sp)
                 if (video.progress != null) {
-                    LinearProgressIndicator(progress = { video.progress ?: 0f }, modifier = Modifier.fillMaxWidth(), color = LpCyan, trackColor = LpSurfaceStrong)
+                    LinearProgressIndicator(progress = { video.progress }, modifier = Modifier.fillMaxWidth(), color = LpCyan, trackColor = LpSurfaceStrong)
                 } else {
                     Text("Completed", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }

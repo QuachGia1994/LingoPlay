@@ -119,7 +119,18 @@ object LocalMediaRepository {
                 buffer.clear()
                 val sampleSize = extractor.readSampleData(buffer, 0)
                 if (sampleSize < 0) break
-                info.set(0, sampleSize, extractor.sampleTime, extractor.sampleFlags)
+                val extractorFlags = extractor.sampleFlags
+                if (extractorFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED != 0) {
+                    throw IllegalStateException("Encrypted audio tracks are not supported.")
+                }
+                var codecFlags = 0
+                if (extractorFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                    codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+                }
+                if (extractorFlags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME != 0) {
+                    codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_PARTIAL_FRAME
+                }
+                info.set(0, sampleSize, extractor.sampleTime, codecFlags)
                 muxer.writeSampleData(outputTrackIndex, buffer, info)
                 if (!extractor.advance()) break
             }

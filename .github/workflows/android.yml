@@ -1,0 +1,88 @@
+name: Android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify wrapper
+        run: ./gradlew --version
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Build optimized release
+        run: ./gradlew assembleRelease bundleRelease --stacktrace
+
+      - name: Verify 16 KB native alignment
+        working-directory: .
+        run: |
+          python3 scripts/verify_android_release.py android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Sign installable test APK
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/lingoplay-ci.jks" \
+            -storepass android -keypass android -alias lingoplay \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=LingoPlay CI,O=LingoPlay,C=VN"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks "$RUNNER_TEMP/lingoplay-ci.jks" \
+            --ks-key-alias lingoplay \
+            --ks-pass pass:android --key-pass pass:android \
+            --out app/build/outputs/apk/release/LingoPlay-release-test.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/LingoPlay-release-test.apk
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-Android
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: |
+            android/app/build/outputs/apk/release/LingoPlay-release-test.apk
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+            android/app/build/outputs/bundle/release/*.aab
+            android/app/build/outputs/mapping/release/mapping.txt
+            android/app/build/reports/lint-results-debug.html
