@@ -45,6 +45,9 @@ jobs:
                               def files = project.configurations.getByName(name).files
                               println("Resolved ${project.path}:${name} -> ${files.size()} files")
                           }
+                          def aapt2Dep = project.dependencies.create('com.android.tools.build:aapt2:9.3.2-15703166:windows@jar')
+                          def aapt2Config = project.configurations.detachedConfiguration(aapt2Dep)
+                          println("Resolved AAPT2 Windows -> ${aapt2Config.files.size()} files")
                       }
                   }
               }
