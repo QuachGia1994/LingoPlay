@@ -1,0 +1,56 @@
+name: Maven Bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prefetch:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        shell: pwsh
+        run: |
+          cmd /c "echo y| sdkmanager.bat --licenses" | Out-Null
+          sdkmanager.bat "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+
+      - name: Prefetch Gradle plugins and Maven dependencies only
+        shell: pwsh
+        run: |
+          ./gradlew.bat :app:dependencies --configuration debugCompileClasspath --stacktrace
+          ./gradlew.bat :app:dependencies --configuration debugRuntimeClasspath --stacktrace
+          ./gradlew.bat :app:dependencies --configuration releaseCompileClasspath --stacktrace
+          ./gradlew.bat :app:dependencies --configuration releaseRuntimeClasspath --stacktrace
+          ./gradlew.bat :app:dependencies --configuration testDebugUnitTestRuntimeClasspath --stacktrace
+
+      - name: Package Maven cache
+        shell: pwsh
+        run: |
+          tar -C "$env:USERPROFILE\.gradle\caches" -czf gradle-modules-2.tar.gz modules-2
+
+      - name: Upload Maven cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-gradle-modules-2
+          if-no-files-found: error
+          path: android/gradle-modules-2.tar.gz
+          retention-days: 1
