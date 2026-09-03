@@ -1,8 +1,10 @@
 package com.lingoplay.app
 
+import android.content.Context
 import android.content.Intent
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -94,13 +97,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER }
-private enum class Tab { HOME, LIBRARY, OFFLINE, SETTINGS }
+private enum class Tab { HOME, LIBRARY, SETTINGS }
+private enum class UiLanguage { ENGLISH, VIETNAMESE }
+
+private fun UiLanguage.text(english: String, vietnamese: String): String =
+    if (this == UiLanguage.VIETNAMESE) vietnamese else english
 
 private val accentBrush = Brush.horizontalGradient(listOf(LpViolet, LpBlue, LpCyan))
 
@@ -135,6 +143,12 @@ fun LingoPlayApp() {
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val uiPreferences = remember(context) { context.getSharedPreferences("lingoplay_ui", Context.MODE_PRIVATE) }
+    var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
+    var uiLanguageName by rememberSaveable {
+        mutableStateOf(uiPreferences.getString("ui_language", UiLanguage.ENGLISH.name) ?: UiLanguage.ENGLISH.name)
+    }
+    val uiLanguage = runCatching { UiLanguage.valueOf(uiLanguageName) }.getOrDefault(UiLanguage.ENGLISH)
     val stage = Stage.valueOf(stageName)
     val tab = Tab.valueOf(tabName)
     val preparationState = MediaPreparationState.valueOf(mediaState)
@@ -143,7 +157,7 @@ fun LingoPlayApp() {
     val ttsPhase = TTSPhase.valueOf(ttsPhaseName)
     val mixPhase = MixPhase.valueOf(mixPhaseName)
 
-    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -272,19 +286,25 @@ fun LingoPlayApp() {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF0B0716),
-                        LpBackground,
-                        Color(0xFF04131C),
+    LingoPlayTheme(highContrast = highContrast) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            if (highContrast) {
+                                listOf(Color.Black, LpBackground, Color(0xFF061018))
+                            } else {
+                                listOf(Color(0xFF0B0716), LpBackground, Color(0xFF04131C))
+                            },
+                        ),
                     ),
-                ),
-            ),
-    ) {
+            ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -301,9 +321,13 @@ fun LingoPlayApp() {
                     Stage.PREPARE -> PrepareScreen(
                         media = selectedMedia,
                         onBack = { stageName = Stage.HOME.name },
-                        onEdit = { mediaPicker.launch(arrayOf("video/*")) },
+                        onEdit = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onTranslate = {
-                            if (selectedMedia == null) mediaPicker.launch(arrayOf("video/*")) else stageName = Stage.PROCESSING.name
+                            if (selectedMedia == null) {
+                                mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                            } else {
+                                stageName = Stage.PROCESSING.name
+                            }
                         },
                     )
 
@@ -345,8 +369,9 @@ fun LingoPlayApp() {
 
                     Stage.HOME -> when (tab) {
                         Tab.HOME -> HomeScreen(
+                            language = uiLanguage,
                             items = libraryItems,
-                            onImport = { mediaPicker.launch(arrayOf("video/*")) },
+                            onImport = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                             onOpenItem = { item ->
                                 activeLibraryItem = item
                                 selectedMedia = LocalLibraryStore.importedMedia(item)
@@ -357,7 +382,7 @@ fun LingoPlayApp() {
                         )
 
                         Tab.LIBRARY -> LibraryScreen(
-                            offlineOnly = false,
+                            language = uiLanguage,
                             items = libraryItems,
                             onOpenItem = { item ->
                                 activeLibraryItem = item
@@ -378,31 +403,21 @@ fun LingoPlayApp() {
                             },
                         )
 
-                        Tab.OFFLINE -> LibraryScreen(
-                            offlineOnly = true,
-                            items = libraryItems,
-                            onOpenItem = { item ->
-                                activeLibraryItem = item
-                                selectedMedia = LocalLibraryStore.importedMedia(item)
-                                mixResult = item.asProcessedResult()
-                                translationDocument = item.asTranslationDocument()
-                                stageName = Stage.PLAYER.name
-                            },
-                            onShare = { item ->
-                                context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
-                            },
-                            onDelete = { item ->
-                                scope.launch {
-                                    LocalLibraryStore.delete(context, item)
-                                    libraryItems = LocalLibraryStore.load(context)
-                                    if (activeLibraryItem?.id == item.id) activeLibraryItem = null
-                                }
-                            },
-                        )
 
                         Tab.SETTINGS -> SettingsScreen(
+                            language = uiLanguage,
+                            highContrast = highContrast,
                             wifiOnly = wifiOnly,
                             bilingualSubtitles = bilingualSubtitles,
+                            onToggleAppearance = {
+                                highContrast = !highContrast
+                                uiPreferences.edit { putBoolean("high_contrast", highContrast) }
+                            },
+                            onToggleLanguage = {
+                                val next = if (uiLanguage == UiLanguage.ENGLISH) UiLanguage.VIETNAMESE else UiLanguage.ENGLISH
+                                uiLanguageName = next.name
+                                uiPreferences.edit { putString("ui_language", next.name) }
+                            },
                             onWifiOnlyChange = { wifiOnly = it },
                             onBilingualSubtitlesChange = { bilingualSubtitles = it },
                         )
@@ -412,13 +427,13 @@ fun LingoPlayApp() {
 
             if (stage == Stage.HOME) {
                 BottomNavigation(
+                    language = uiLanguage,
                     selected = tab,
                     onSelected = { tabName = it.name },
-                    onBrand = {
-                        tabName = Tab.HOME.name
-                        stageName = Stage.HOME.name
-                    },
+                    onImport = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                 )
+            }
+                }
             }
         }
     }
@@ -445,6 +460,7 @@ private fun SplashScreen() {
 
 @Composable
 private fun HomeScreen(
+    language: UiLanguage,
     items: List<LocalLibraryItem>,
     onImport: () -> Unit,
     onOpenItem: (LocalLibraryItem) -> Unit,
@@ -453,35 +469,37 @@ private fun HomeScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("LingoPlay", color = LpCyan, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("Understand without borders", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("Understand without borders", "Hiểu mọi nội dung, không rào cản"), color = LpSecondaryText, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
             Surface(color = LpSurface, shape = CircleShape) {
-                Text("PLUS", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.WorkspacePremium, contentDescription = "LingoPlay Plus", tint = LpViolet, modifier = Modifier.size(21.dp))
+                }
             }
         }
 
         LpCard {
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("AI video translation\n& dubbing", fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
-                    Text("Import a video you already have. The media stays on this device.", color = LpSecondaryText, fontSize = 14.sp)
+                    Text(language.text("AI video translation\n& dubbing", "Dịch video AI\n& lồng tiếng"), fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
+                    Text(language.text("Import a video you already have. The media stays on this device.", "Chọn video có sẵn trong thư viện. Media luôn nằm trên thiết bị này."), color = LpSecondaryText, fontSize = 14.sp)
                 }
                 Spacer(Modifier.width(12.dp))
                 BrandMark()
             }
-            PrimaryAction("Import Video", Icons.Rounded.Add, onImport)
+            PrimaryAction(language.text("Import Video", "Chọn video"), Icons.Rounded.Add, onImport)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.Shield, contentDescription = null, tint = LpCyan, modifier = Modifier.size(16.dp))
-                Text("Video and audio are never uploaded", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("Video and audio are never uploaded", "Video và audio không bao giờ được tải lên server"), color = LpSecondaryText, fontSize = 12.sp)
             }
         }
 
-        SectionHeader("Recent", "Local library")
+        SectionHeader(language.text("Recent", "Gần đây"), language.text("Local library", "Thư viện cục bộ"))
         if (items.isEmpty()) {
             LpCard {
-                Text("No dubbed videos yet", fontWeight = FontWeight.Bold)
-                Text("Import and process a local video. Completed results are saved privately on this device.", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("No dubbed videos yet", "Chưa có video lồng tiếng"), fontWeight = FontWeight.Bold)
+                Text(language.text("Import and process a local video. Completed results are saved privately on this device.", "Chọn và xử lý một video. Kết quả hoàn tất sẽ được lưu riêng trên thiết bị."), color = LpSecondaryText, fontSize = 12.sp)
             }
         } else {
             items.take(3).forEach { item ->
@@ -490,9 +508,9 @@ private fun HomeScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CapabilityCard(Icons.Rounded.Mic, "On-device", "Speech AI", Modifier.weight(1f))
-            CapabilityCard(Icons.Rounded.Subtitles, "Bilingual", "Subtitles", Modifier.weight(1f))
-            CapabilityCard(Icons.Rounded.Download, "Offline", "Playback", Modifier.weight(1f))
+            CapabilityCard(Icons.Rounded.Mic, language.text("On-device", "Trên máy"), language.text("Speech AI", "AI giọng nói"), Modifier.weight(1f))
+            CapabilityCard(Icons.Rounded.Subtitles, language.text("Bilingual", "Song ngữ"), language.text("Subtitles", "Phụ đề"), Modifier.weight(1f))
+            CapabilityCard(Icons.Rounded.Download, "Offline", language.text("Playback", "Phát lại"), Modifier.weight(1f))
         }
     }
 }
@@ -944,7 +962,7 @@ private fun SingleClockDubPlayer(
 
 @Composable
 private fun LibraryScreen(
-    offlineOnly: Boolean,
+    language: UiLanguage,
     items: List<LocalLibraryItem>,
     onOpenItem: (LocalLibraryItem) -> Unit,
     onShare: (LocalLibraryItem) -> Unit,
@@ -953,17 +971,17 @@ private fun LibraryScreen(
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text(if (offlineOnly) "Offline" else "Library", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                Text(if (offlineOnly) "Saved locally and ready without a connection" else "Your translated videos", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("Library", "Thư viện"), fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text(language.text("Saved dubs · always available offline", "Video đã lưu · luôn xem được khi offline"), color = LpSecondaryText, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
-            Icon(if (offlineOnly) Icons.Rounded.CloudDownload else Icons.Rounded.VideoLibrary, contentDescription = null, tint = LpCyan)
+            Icon(Icons.Rounded.VideoLibrary, contentDescription = null, tint = LpCyan)
         }
 
         if (items.isEmpty()) {
             LpCard {
-                Text("Nothing saved yet", fontWeight = FontWeight.Bold)
-                Text("Completed dubs appear here automatically after local processing finishes.", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("Nothing saved yet", "Chưa có video đã lưu"), fontWeight = FontWeight.Bold)
+                Text(language.text("Completed dubs appear here automatically after local processing finishes.", "Video lồng tiếng hoàn tất sẽ tự động xuất hiện ở đây sau khi xử lý cục bộ."), color = LpSecondaryText, fontSize = 12.sp)
             }
         } else {
             items.forEach { item ->
@@ -978,72 +996,102 @@ private fun LibraryScreen(
 
         val totalBytes = LocalLibraryStore.totalBytes(items)
         LpCard {
-            SectionHeader("Saved media", "${MediaFormatting.bytes(totalBytes)}")
-            Text("${items.size} local dubbed video${if (items.size == 1) "" else "s"} · stored only in LingoPlay app storage", color = LpSecondaryText, fontSize = 12.sp)
+            SectionHeader(language.text("Saved media", "Media đã lưu"), "${MediaFormatting.bytes(totalBytes)}")
+            Text(language.text("${items.size} local dubbed video${if (items.size == 1) "" else "s"} · stored only in LingoPlay app storage", "${items.size} video lồng tiếng cục bộ · chỉ lưu trong bộ nhớ ứng dụng LingoPlay"), color = LpSecondaryText, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
 private fun SettingsScreen(
+    language: UiLanguage,
+    highContrast: Boolean,
     wifiOnly: Boolean,
     bilingualSubtitles: Boolean,
+    onToggleAppearance: () -> Unit,
+    onToggleLanguage: () -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
     onBilingualSubtitlesChange: (Boolean) -> Unit,
 ) {
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Settings", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                Text("Simple playback and privacy preferences", color = LpSecondaryText, fontSize = 12.sp)
+                Text(language.text("Settings", "Cài đặt"), fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text(language.text("Playback, appearance and privacy preferences", "Tùy chọn phát lại, giao diện và riêng tư"), color = LpSecondaryText, fontSize = 12.sp)
             }
             BrandMark(size = 50.dp)
         }
 
         LpCard {
-            SettingsValueRow(Icons.Rounded.Person, "AI Voice", "Nam · Natural")
+            SettingsValueRow(
+                Icons.Rounded.Tune,
+                language.text("Appearance", "Giao diện"),
+                if (highContrast) language.text("High Contrast", "Tương phản cao") else "Midnight",
+                onToggleAppearance,
+            )
             CardDivider()
-            SettingsValueRow(Icons.Rounded.Language, "Playback Language", "Vietnamese")
+            SettingsValueRow(
+                Icons.Rounded.Language,
+                language.text("App Language", "Ngôn ngữ ứng dụng"),
+                if (language == UiLanguage.VIETNAMESE) "Tiếng Việt" else "English",
+                onToggleLanguage,
+            )
             CardDivider()
-            ToggleRow(Icons.Rounded.Wifi, "Download models on Wi-Fi only", wifiOnly, onWifiOnlyChange)
+            SettingsValueRow(Icons.Rounded.Person, language.text("AI Voice", "Giọng AI"), "Nam · Natural")
             CardDivider()
-            ToggleRow(Icons.Rounded.Subtitles, "Bilingual subtitles", bilingualSubtitles, onBilingualSubtitlesChange)
+            SettingsValueRow(Icons.Rounded.Language, language.text("Dubbing Language", "Ngôn ngữ lồng tiếng"), language.text("Vietnamese", "Tiếng Việt"))
+            CardDivider()
+            ToggleRow(Icons.Rounded.Wifi, language.text("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), wifiOnly, onWifiOnlyChange)
+            CardDivider()
+            ToggleRow(Icons.Rounded.Subtitles, language.text("Bilingual subtitles", "Phụ đề song ngữ"), bilingualSubtitles, onBilingualSubtitlesChange)
         }
 
         LpCard {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpCyan)
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Private by architecture", fontWeight = FontWeight.Bold)
-                    Text("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.", color = LpSecondaryText, fontSize = 13.sp)
+                    Text(language.text("Private by architecture", "Riêng tư ngay từ kiến trúc"), fontWeight = FontWeight.Bold)
+                    Text(language.text("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.", "Video và audio không bao giờ đi tới backend LingoPlay. Chỉ văn bản transcript cần cho dịch thuật được gửi dưới dạng JSON gọn khi bật dịch online."), color = LpSecondaryText, fontSize = 13.sp)
                 }
             }
         }
 
         LpCard {
-            SettingsValueRow(Icons.Rounded.Storage, "Downloaded AI Models", "Not installed")
+            SettingsValueRow(Icons.Rounded.Storage, language.text("Downloaded AI Models", "Model AI đã tải"), language.text("Not installed", "Chưa cài"))
             CardDivider()
-            SettingsValueRow(Icons.Rounded.Info, "About LingoPlay", "Foundation")
+            SettingsValueRow(Icons.Rounded.Info, language.text("About LingoPlay", "Giới thiệu LingoPlay"), "Foundation")
         }
     }
 }
 
 @Composable
-private fun BottomNavigation(selected: Tab, onSelected: (Tab) -> Unit, onBrand: () -> Unit) {
-    Surface(color = Color(0xF00B0E18), tonalElevation = 8.dp) {
+private fun BottomNavigation(
+    language: UiLanguage,
+    selected: Tab,
+    onSelected: (Tab) -> Unit,
+    onImport: () -> Unit,
+) {
+    Surface(color = Color(0xF50B0E18), tonalElevation = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BottomTab(Tab.HOME, selected, Icons.Rounded.Home, "Home", onSelected, Modifier.weight(1f))
-            BottomTab(Tab.LIBRARY, selected, Icons.Rounded.VideoLibrary, "Library", onSelected, Modifier.weight(1f))
-            Box(modifier = Modifier.weight(0.9f), contentAlignment = Alignment.Center) {
-                Box(modifier = Modifier.clickable(onClick = onBrand)) {
-                    BrandMark(size = 50.dp)
+            BottomTab(Tab.HOME, selected, Icons.Rounded.Home, language.text("Home", "Trang chủ"), onSelected, Modifier.weight(1f))
+            BottomTab(Tab.LIBRARY, selected, Icons.Rounded.VideoLibrary, language.text("Library", "Thư viện"), onSelected, Modifier.weight(1f))
+            Column(
+                modifier = Modifier.weight(1f).clickable(onClick = onImport).padding(vertical = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Box(
+                    modifier = Modifier.size(38.dp).clip(CircleShape).background(accentBrush),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(21.dp))
                 }
+                Text(language.text("Import", "Chọn video"), color = LpCyan, fontSize = 9.sp, maxLines = 1)
             }
-            BottomTab(Tab.OFFLINE, selected, Icons.Rounded.CloudDownload, "Offline", onSelected, Modifier.weight(1f))
-            BottomTab(Tab.SETTINGS, selected, Icons.Rounded.Settings, "Settings", onSelected, Modifier.weight(1f))
+            BottomTab(Tab.SETTINGS, selected, Icons.Rounded.Settings, language.text("Settings", "Cài đặt"), onSelected, Modifier.weight(1f))
         }
     }
 }
@@ -1260,8 +1308,9 @@ private fun PlayerAction(
 }
 
 @Composable
-private fun SettingsValueRow(icon: ImageVector, title: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+private fun SettingsValueRow(icon: ImageVector, title: String, value: String, action: (() -> Unit)? = null) {
+    val modifier = if (action != null) Modifier.fillMaxWidth().clickable(onClick = action) else Modifier.fillMaxWidth()
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(icon, contentDescription = null, tint = LpCyan, modifier = Modifier.size(21.dp))
         Text(title, modifier = Modifier.weight(1f), fontSize = 13.sp)
         Text(value, color = LpSecondaryText, fontSize = 11.sp)

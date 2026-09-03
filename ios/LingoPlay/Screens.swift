@@ -1,7 +1,25 @@
 import AVFoundation
+import CoreTransferable
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+
+private struct PickedVideoFile: Transferable, Sendable {
+    let url: URL
+
+    nonisolated static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .movie) { received in
+            let source = received.file
+            let fileExtension = source.pathExtension.isEmpty ? "mov" : source.pathExtension
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(fileExtension)
+            try FileManager.default.copyItem(at: source, to: copy)
+            return PickedVideoFile(url: copy)
+        }
+    }
+}
 
 struct SplashView: View {
     var body: some View {
@@ -32,6 +50,7 @@ struct SplashView: View {
 
 struct HomeView: View {
     @Bindable var model: AppModel
+    @State private var pickedVideo: PhotosPickerItem?
 
     var body: some View {
         ScrollView {
@@ -41,7 +60,7 @@ struct HomeView: View {
                         Text("LingoPlay")
                             .font(.title2.bold())
                             .foregroundStyle(LPTheme.accent)
-                        Text("Understand without borders")
+                        Text(model.uiText("Understand without borders", "Hiểu mọi nội dung, không rào cản"))
                             .font(.caption)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -55,32 +74,32 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("AI video translation\n& dubbing")
+                            Text(model.uiText("AI video translation\n& dubbing", "Dịch video AI\n& lồng tiếng"))
                                 .font(.system(size: 31, weight: .bold, design: .rounded))
-                            Text("Import a video you already have. The media stays on this device.")
+                            Text(model.uiText("Import a video you already have. The media stays on this device.", "Chọn video có sẵn trong thư viện. Media luôn nằm trên thiết bị này."))
                                 .font(.subheadline)
                                 .foregroundStyle(LPTheme.secondaryText)
                         }
                         Spacer(minLength: 12)
                         LPBrandMark()
                     }
-                    LPPrimaryButton(title: "Import Video", systemImage: "plus") {
+                    LPPrimaryButton(title: model.uiText("Import Video", "Chọn video"), systemImage: "plus") {
                         model.beginImport()
                     }
-                    Label("Video and audio are never uploaded", systemImage: "lock.shield.fill")
+                    Label(model.uiText("Video and audio are never uploaded", "Video và audio không bao giờ được tải lên server"), systemImage: "lock.shield.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(LPTheme.secondaryText)
                 }
                 .lpCard()
 
-                LPSectionHeader(title: "Recent", trailing: "Local library")
+                LPSectionHeader(title: model.uiText("Recent", "Gần đây"), trailing: model.uiText("Local library", "Thư viện cục bộ"))
 
                 VStack(spacing: 12) {
                     if model.libraryItems.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("No dubbed videos yet")
+                            Text(model.uiText("No dubbed videos yet", "Chưa có video lồng tiếng"))
                                 .font(.headline)
-                            Text("Import and process a local video. Completed results are saved privately on this device.")
+                            Text(model.uiText("Import and process a local video. Completed results are saved privately on this device.", "Chọn và xử lý một video. Kết quả hoàn tất sẽ được lưu riêng trên thiết bị."))
                                 .font(.caption)
                                 .foregroundStyle(LPTheme.secondaryText)
                         }
@@ -96,9 +115,9 @@ struct HomeView: View {
                 }
 
                 HStack(spacing: 12) {
-                    MiniCapability(icon: "waveform", title: "On-device", detail: "Speech AI")
-                    MiniCapability(icon: "captions.bubble.fill", title: "Bilingual", detail: "Subtitles")
-                    MiniCapability(icon: "arrow.down.circle.fill", title: "Offline", detail: "Playback")
+                    MiniCapability(icon: "waveform", title: model.uiText("On-device", "Trên máy"), detail: model.uiText("Speech AI", "AI giọng nói"))
+                    MiniCapability(icon: "captions.bubble.fill", title: model.uiText("Bilingual", "Song ngữ"), detail: model.uiText("Subtitles", "Phụ đề"))
+                    MiniCapability(icon: "arrow.down.circle.fill", title: "Offline", detail: model.uiText("Playback", "Phát lại"))
                 }
             }
             .padding(.horizontal, 18)
@@ -106,9 +125,20 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
-        .fileImporter(isPresented: $model.importerPresented, allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie]) { result in
-            guard case .success(let url) = result else { return }
-            Task { await model.importMedia(from: url) }
+        .photosPicker(
+            isPresented: $model.importerPresented,
+            selection: $pickedVideo,
+            matching: .videos,
+            preferredItemEncoding: .automatic
+        )
+        .onChange(of: pickedVideo) { _, item in
+            guard let item else { return }
+            Task {
+                guard let picked = try? await item.loadTransferable(type: PickedVideoFile.self) else { return }
+                defer { try? FileManager.default.removeItem(at: picked.url) }
+                await model.importMedia(from: picked.url)
+                pickedVideo = nil
+            }
         }
     }
 }
@@ -198,11 +228,12 @@ private struct MiniCapability: View {
 
 struct PrepareView: View {
     @Bindable var model: AppModel
+    @State private var pickedVideo: PhotosPickerItem?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                ScreenHeader(title: "Prepare", backAction: model.returnHome)
+                ScreenHeader(title: model.uiText("Prepare", "Chuẩn bị"), backAction: model.returnHome)
 
                 VStack(spacing: 12) {
                     VideoPlaceholder(width: nil, height: 190)
@@ -216,7 +247,7 @@ struct PrepareView: View {
                                 .foregroundStyle(LPTheme.secondaryText)
                         }
                         Spacer()
-                        Button("Edit") {
+                        Button(model.uiText("Edit", "Đổi video")) {
                             model.importerPresented = true
                         }
                         .font(.caption.weight(.semibold))
@@ -241,11 +272,11 @@ struct PrepareView: View {
                 }
                 .lpCard()
 
-                LPPrimaryButton(title: "Translate & Dub", systemImage: "sparkles") {
+                LPPrimaryButton(title: model.uiText("Translate & Dub", "Dịch & Lồng tiếng"), systemImage: "sparkles") {
                     model.beginProcessing()
                 }
 
-                Text("Estimated time depends on device performance and video duration.")
+                Text(model.uiText("Estimated time depends on device performance and video duration.", "Thời gian xử lý phụ thuộc hiệu năng thiết bị và độ dài video."))
                     .font(.caption)
                     .foregroundStyle(LPTheme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -254,9 +285,20 @@ struct PrepareView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
-        .fileImporter(isPresented: $model.importerPresented, allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie]) { result in
-            guard case .success(let url) = result else { return }
-            Task { await model.importMedia(from: url) }
+        .photosPicker(
+            isPresented: $model.importerPresented,
+            selection: $pickedVideo,
+            matching: .videos,
+            preferredItemEncoding: .automatic
+        )
+        .onChange(of: pickedVideo) { _, item in
+            guard let item else { return }
+            Task {
+                guard let picked = try? await item.loadTransferable(type: PickedVideoFile.self) else { return }
+                defer { try? FileManager.default.removeItem(at: picked.url) }
+                await model.importMedia(from: picked.url)
+                pickedVideo = nil
+            }
         }
     }
 
@@ -836,30 +878,29 @@ private struct PlayerAction: View {
 
 struct LibraryView: View {
     @Bindable var model: AppModel
-    let offlineOnly: Bool
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(offlineOnly ? "Offline" : "Library")
+                        Text(model.uiText("Library", "Thư viện"))
                             .font(.largeTitle.bold())
-                        Text(offlineOnly ? "Ready without a connection" : "Your translated videos")
+                        Text(model.uiText("Saved dubs · always available offline", "Video đã lưu · luôn xem được khi offline"))
                             .font(.caption)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
                     Spacer()
-                    Image(systemName: offlineOnly ? "arrow.down.circle.fill" : "magnifyingglass")
+                    Image(systemName: "rectangle.stack.fill")
                         .font(.title3)
                         .foregroundStyle(LPTheme.cyan)
                 }
 
                 if model.libraryItems.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Nothing saved yet")
+                        Text(model.uiText("Nothing saved yet", "Chưa có video đã lưu"))
                             .font(.headline)
-                        Text("Completed dubs appear here automatically after local processing finishes.")
+                        Text(model.uiText("Completed dubs appear here automatically after local processing finishes.", "Video lồng tiếng hoàn tất sẽ tự động xuất hiện ở đây sau khi xử lý cục bộ."))
                             .font(.caption)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -878,8 +919,8 @@ struct LibraryView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 11) {
-                    LPSectionHeader(title: "Saved media", trailing: MediaFormatting.bytes(model.libraryBytes))
-                    Text("\(model.libraryItems.count) local dubbed video\(model.libraryItems.count == 1 ? "" : "s") · stored only in LingoPlay app storage")
+                    LPSectionHeader(title: model.uiText("Saved media", "Media đã lưu"), trailing: MediaFormatting.bytes(model.libraryBytes))
+                    Text(model.uiText("\(model.libraryItems.count) local dubbed video\(model.libraryItems.count == 1 ? "" : "s") · stored only in LingoPlay app storage", "\(model.libraryItems.count) video lồng tiếng cục bộ · chỉ lưu trong bộ nhớ ứng dụng LingoPlay"))
                         .font(.caption)
                         .foregroundStyle(LPTheme.secondaryText)
                 }
@@ -900,9 +941,9 @@ struct SettingsView: View {
             VStack(spacing: 20) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Settings")
+                        Text(model.uiText("Settings", "Cài đặt"))
                             .font(.largeTitle.bold())
-                        Text("Simple playback and privacy preferences")
+                        Text(model.uiText("Playback, appearance and privacy preferences", "Tùy chọn phát lại, giao diện và riêng tư"))
                             .font(.caption)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -911,36 +952,54 @@ struct SettingsView: View {
                 }
 
                 VStack(spacing: 0) {
-                    SettingsValueRow(icon: "person.wave.2.fill", title: "AI Voice", value: "Nam · Natural")
+                    Button(action: model.toggleAppearance) {
+                        SettingsValueRow(
+                            icon: "circle.lefthalf.filled",
+                            title: model.uiText("Appearance", "Giao diện"),
+                            value: model.highContrast ? model.uiText("High Contrast", "Tương phản cao") : "Midnight"
+                        )
+                    }
+                    .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
-                    SettingsValueRow(icon: "character.bubble.fill", title: "Playback Language", value: "Vietnamese")
+                    Button(action: model.toggleLanguage) {
+                        SettingsValueRow(
+                            icon: "globe",
+                            title: model.uiText("App Language", "Ngôn ngữ ứng dụng"),
+                            value: model.uiLanguageLabel
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(LPTheme.border)
+                    SettingsValueRow(icon: "person.wave.2.fill", title: model.uiText("AI Voice", "Giọng AI"), value: "Nam · Natural")
+                    Divider().overlay(LPTheme.border)
+                    SettingsValueRow(icon: "character.bubble.fill", title: model.uiText("Dubbing Language", "Ngôn ngữ lồng tiếng"), value: model.uiText("Vietnamese", "Tiếng Việt"))
                     Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.wifiOnly) {
-                        Label("Download models on Wi-Fi only", systemImage: "wifi")
+                        Label(model.uiText("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), systemImage: "wifi")
                     }
                     .padding(.vertical, 14)
                     Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.bilingualSubtitles) {
-                        Label("Bilingual subtitles", systemImage: "captions.bubble.fill")
+                        Label(model.uiText("Bilingual subtitles", "Phụ đề song ngữ"), systemImage: "captions.bubble.fill")
                     }
                     .padding(.vertical, 14)
                 }
                 .lpCard()
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("Private by architecture", systemImage: "lock.shield.fill")
+                    Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
                         .font(.headline)
                         .foregroundStyle(LPTheme.accent)
-                    Text("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.")
+                    Text(model.uiText("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.", "Video và audio không bao giờ đi tới backend LingoPlay. Chỉ văn bản transcript cần cho dịch thuật được gửi dưới dạng JSON gọn khi bật dịch online."))
                         .font(.subheadline)
                         .foregroundStyle(LPTheme.secondaryText)
                 }
                 .lpCard()
 
                 VStack(spacing: 0) {
-                    SettingsValueRow(icon: "shippingbox.fill", title: "Downloaded AI Models", value: "Not installed")
+                    SettingsValueRow(icon: "shippingbox.fill", title: model.uiText("Downloaded AI Models", "Model AI đã tải"), value: model.uiText("Not installed", "Chưa cài"))
                     Divider().overlay(LPTheme.border)
-                    SettingsValueRow(icon: "info.circle.fill", title: "About LingoPlay", value: "Foundation")
+                    SettingsValueRow(icon: "info.circle.fill", title: model.uiText("About LingoPlay", "Giới thiệu LingoPlay"), value: "Foundation")
                 }
                 .lpCard()
             }

@@ -22,6 +22,8 @@ All notable changes to LingoPlay are documented here.
 - Android physical-device Stage 6 instrumentation fixtures covering a short mix/remux and a sustained 120-second hardware-codec run; both pass on a MEIZU Lucky 08 (Android 14, arm64-v8a) with final video+audio track and duration assertions.
 - Matching generated LingoPlay launcher/app-icon assets, native launch branding, and branded loading marks for iOS and Android.
 - Durable Stage 7 local libraries on iOS and Android that save successful final MP4s with compact translation metadata, reopen them for playback, expose native share/export, delete local results, and report real saved-media storage usage.
+- Stage 7.1 video-library import UX using Android Photo Picker `VideoOnly` and iOS Photos Picker file transfer, avoiding the generic folder browser as the primary import path and avoiding full-video in-memory loads.
+- Persisted Midnight/High Contrast appearance and English/Tiếng Việt interface-language controls for the primary mobile shell.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
@@ -32,4 +34,7 @@ All notable changes to LingoPlay are documented here.
 - Android Whisper audio decoding is bounded to 25-second chunks to avoid full-podcast PCM memory growth and the sherpa Whisper stream limit.
 - Android build configuration now uses AGP 9 built-in Kotlin instead of the incompatible kotlin-android plugin.
 - Android CI now builds and uploads an installable `app-debug.apk` in addition to the optimized release-test APK/AAB, so device testing and production-like artifact testing are both available.
-- Home, Library, and Offline no longer show demo completed videos; they render only real durable local outputs with honest empty states.
+- Home and Library no longer show demo completed videos; they render only real durable local outputs with honest empty states.
+- Removed the redundant Offline tab because every durable Library item is already local/offline; the center bottom-bar affordance is now the explicit Import action instead of a duplicate Home button.
+- Android dark-theme content propagation now establishes the correct light foreground at the root, with a brighter accessible secondary palette and an optional High Contrast mode.
+- Android Plus presentation now mirrors the compact premium-icon treatment used by iOS instead of a text-only `PLUS` pill.

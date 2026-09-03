@@ -5,7 +5,7 @@ enum LPTheme {
     static let surface = Color.white.opacity(0.055)
     static let surfaceStrong = Color.white.opacity(0.085)
     static let border = Color.white.opacity(0.10)
-    static let secondaryText = Color.white.opacity(0.62)
+    static let secondaryText = Color.white.opacity(0.74)
     static let violet = Color(red: 0.66, green: 0.29, blue: 1.0)
     static let cyan = Color(red: 0.10, green: 0.82, blue: 1.0)
     static let accent = LinearGradient(colors: [violet, Color(red: 0.35, green: 0.44, blue: 1.0), cyan], startPoint: .leading, endPoint: .trailing)
@@ -81,9 +81,11 @@ struct LPSectionHeader: View {
 }
 
 struct LPBackdrop: View {
+    var highContrast = false
+
     var body: some View {
         ZStack {
-            LPTheme.background
+            highContrast ? Color.black : LPTheme.background
             Circle()
                 .fill(LPTheme.violet.opacity(0.13))
                 .frame(width: 330, height: 330)

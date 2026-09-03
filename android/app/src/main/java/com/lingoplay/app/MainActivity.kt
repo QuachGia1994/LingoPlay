@@ -11,9 +11,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            LingoPlayTheme {
-                LingoPlayApp()
-            }
+            LingoPlayApp()
         }
     }
 

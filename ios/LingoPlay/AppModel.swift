@@ -16,7 +16,6 @@ final class AppModel {
     enum Tab: String, CaseIterable, Identifiable {
         case home = "Home"
         case library = "Library"
-        case offline = "Offline"
         case settings = "Settings"
 
         var id: String { rawValue }
@@ -25,7 +24,6 @@ final class AppModel {
             switch self {
             case .home: "house.fill"
             case .library: "rectangle.stack.fill"
-            case .offline: "arrow.down.circle.fill"
             case .settings: "gearshape.fill"
             }
         }
@@ -40,6 +38,8 @@ final class AppModel {
     var playbackSpeed = 1.0
     var wifiOnly = true
     var bilingualSubtitles = true
+    var highContrast = UserDefaults.standard.bool(forKey: "lingoplay.highContrast")
+    var uiLanguageCode = UserDefaults.standard.string(forKey: "lingoplay.uiLanguage") ?? "en"
     var importerPresented = false
     var selectedMedia: LocalMediaItem?
     var mediaState: MediaPreparationState = .idle
@@ -386,6 +386,24 @@ final class AppModel {
         videoPlayer = nil
         playbackPosition = 0
         playbackDuration = 0
+    }
+
+    var uiLanguageLabel: String {
+        uiLanguageCode == "vi" ? "Tiếng Việt" : "English"
+    }
+
+    func uiText(_ english: String, _ vietnamese: String) -> String {
+        uiLanguageCode == "vi" ? vietnamese : english
+    }
+
+    func toggleAppearance() {
+        highContrast.toggle()
+        UserDefaults.standard.set(highContrast, forKey: "lingoplay.highContrast")
+    }
+
+    func toggleLanguage() {
+        uiLanguageCode = uiLanguageCode == "vi" ? "en" : "vi"
+        UserDefaults.standard.set(uiLanguageCode, forKey: "lingoplay.uiLanguage")
     }
 
     func returnHome() {

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct RootView: View {
@@ -5,7 +6,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            LPBackdrop()
+            LPBackdrop(highContrast: model.highContrast)
 
             VStack(spacing: 0) {
                 content
@@ -18,6 +19,7 @@ struct RootView: View {
         }
         .foregroundStyle(.white)
         .tint(LPTheme.cyan)
+        .environment(\.locale, Locale(identifier: model.uiLanguageCode))
         .task {
             guard model.stage == .splash else { return }
             try? await Task.sleep(for: .milliseconds(900))
@@ -41,9 +43,7 @@ struct RootView: View {
             case .home:
                 HomeView(model: model)
             case .library:
-                LibraryView(model: model, offlineOnly: false)
-            case .offline:
-                LibraryView(model: model, offlineOnly: true)
+                LibraryView(model: model)
             case .settings:
                 SettingsView(model: model)
             }
@@ -60,15 +60,23 @@ private struct BottomNavigation: View {
             tab(.library)
 
             Button {
-                model.returnHome()
+                model.beginImport()
             } label: {
-                LPBrandMark(compact: true)
-                    .padding(.horizontal, 6)
+                VStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .bold))
+                        .frame(width: 40, height: 40)
+                        .foregroundStyle(.white)
+                        .background(LPTheme.accent, in: Circle())
+                    Text(model.uiText("Import", "Chọn video"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(LPTheme.cyan)
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("LingoPlay Home")
+            .accessibilityLabel(model.uiText("Import Video", "Chọn video"))
 
-            tab(.offline)
             tab(.settings)
         }
         .padding(.horizontal, 12)
@@ -90,12 +98,20 @@ private struct BottomNavigation: View {
             VStack(spacing: 5) {
                 Image(systemName: tab.systemImage)
                     .font(.system(size: 17, weight: .semibold))
-                Text(tab.rawValue)
+                Text(tabLabel(tab))
                     .font(.system(size: 10, weight: .medium))
             }
             .frame(maxWidth: .infinity)
             .foregroundStyle(active ? LPTheme.cyan : LPTheme.secondaryText)
         }
         .buttonStyle(.plain)
+    }
+
+    private func tabLabel(_ tab: AppModel.Tab) -> String {
+        switch tab {
+        case .home: model.uiText("Home", "Trang chủ")
+        case .library: model.uiText("Library", "Thư viện")
+        case .settings: model.uiText("Settings", "Cài đặt")
+        }
     }
 }
