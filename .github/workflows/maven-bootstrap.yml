@@ -41,15 +41,11 @@ jobs:
           ./gradlew.bat :app:dependencies --configuration releaseCompileClasspath --stacktrace
           ./gradlew.bat :app:dependencies --configuration releaseRuntimeClasspath --stacktrace
 
-      - name: Package Maven cache
-        shell: pwsh
-        run: |
-          tar -C "$env:USERPROFILE\.gradle\caches" -czf gradle-modules-2.tar.gz modules-2
-
       - name: Upload Maven cache
         uses: actions/upload-artifact@v4
         with:
           name: android-gradle-modules-2
           if-no-files-found: error
-          path: android/gradle-modules-2.tar.gz
+          path: ~/.gradle/caches/modules-2
+          include-hidden-files: true
           retention-days: 1
