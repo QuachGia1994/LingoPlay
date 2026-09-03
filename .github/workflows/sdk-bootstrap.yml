@@ -7,31 +7,28 @@ permissions:
   contents: read
 
 jobs:
-  package:
-    runs-on: ubuntu-24.04
+  package-windows-build-tools:
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept licenses
-        run: yes | sdkmanager --licenses >/dev/null || true
-
-      - name: Install required SDK packages
-        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
-
-      - name: Package SDK subset
+      - name: Accept licenses and install Build-Tools
+        shell: pwsh
         run: |
-          mkdir -p sdk-subset/platforms sdk-subset/build-tools sdk-subset/licenses
-          cp -a "$ANDROID_SDK_ROOT/platforms/android-37.0" sdk-subset/platforms/
-          cp -a "$ANDROID_SDK_ROOT/build-tools/36.0.0" sdk-subset/build-tools/
-          cp -a "$ANDROID_SDK_ROOT/licenses/." sdk-subset/licenses/
-          tar -C sdk-subset -czf android-sdk-37.0-buildtools-36.tar.gz .
+          cmd /c "echo y| sdkmanager.bat --licenses" | Out-Null
+          sdkmanager.bat "build-tools;36.0.0"
 
-      - name: Upload SDK subset
+      - name: Package Windows Build-Tools
+        shell: pwsh
+        run: |
+          tar -C "$env:ANDROID_SDK_ROOT" -czf windows-build-tools-36.tar.gz build-tools/36.0.0 licenses
+
+      - name: Upload Windows Build-Tools
         uses: actions/upload-artifact@v4
         with:
-          name: android-sdk-37.0-buildtools-36
+          name: android-windows-buildtools-36
           if-no-files-found: error
-          path: android-sdk-37.0-buildtools-36.tar.gz
+          path: windows-build-tools-36.tar.gz
           retention-days: 1
