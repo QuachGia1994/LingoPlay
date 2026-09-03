@@ -1,0 +1,16 @@
+{
+  "name": "lingoplay-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "check": "node --check src/index.ts",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.128.0"
+  }
+}

@@ -1,0 +1,27 @@
+# Android
+android/.gradle/
+android/**/build/
+android/local.properties
+android/app/libs/*.aar
+android/*.log
+
+# iOS
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Backend
+backend/node_modules/
+backend/.wrangler/
+backend/.dev.vars
+backend/.env
+
+# Python / generated checks
+__pycache__/
+*.pyc
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

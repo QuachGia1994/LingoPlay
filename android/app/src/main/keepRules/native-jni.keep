@@ -1,0 +1,5 @@
+# Keep only classes that actually expose JNI entry points. This protects native symbol lookup
+# while still allowing R8 full-mode shrinking/obfuscation for the rest of the app and sherpa.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}

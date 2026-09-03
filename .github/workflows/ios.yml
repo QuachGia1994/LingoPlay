@@ -1,0 +1,62 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: xcodebuild -project ios/LingoPlay.xcodeproj -scheme LingoPlay -resolvePackageDependencies
+
+      - name: Build unsigned iOS app
+        run: >-
+          xcodebuild
+          -project ios/LingoPlay.xcodeproj
+          -scheme LingoPlay
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath build/ios
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          build
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/LingoPlay.app build/ipa/Payload/
+          ditto -c -k --sequesterRsrc --keepParent build/ipa/Payload build/LingoPlay-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-iOS-unsigned-IPA
+          if-no-files-found: error
+          path: build/LingoPlay-unsigned.ipa
