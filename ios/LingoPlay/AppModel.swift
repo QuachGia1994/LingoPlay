@@ -58,11 +58,13 @@ final class AppModel {
     var mediaState: MediaPreparationState = .idle
     var asrState: ASRState = .idle
     var translationState: TranslationState = .idle
+    var ttsState: TTSState = .idle
 
     private let mediaService = LocalMediaService()
     private let asrModelStore = ASRModelStore()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     private let translationService = TranslationService()
+    private let ttsService = SystemVietnameseTTSService()
 
     let recentVideos = [
         RecentVideo(title: "The Future of AI", duration: "01:24:32", languagePair: "EN → VI"),
@@ -83,6 +85,7 @@ final class AppModel {
         mediaState = .importing
         asrState = .idle
         translationState = .idle
+        ttsState = .idle
         processingProgress = 0
         do {
             selectedMedia = try await mediaService.importMedia(from: url)
@@ -101,6 +104,7 @@ final class AppModel {
         processingProgress = 0
         asrState = .idle
         translationState = .idle
+        ttsState = .idle
         stage = .processing
         Task { await prepareAudio() }
     }
@@ -153,8 +157,25 @@ final class AppModel {
             }
             translationState = .completed(document)
             processingProgress = 0.6
+            await synthesizeVietnameseSpeech(document)
         } catch {
             translationState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func synthesizeVietnameseSpeech(_ document: TranslationDocument) async {
+        do {
+            let dub = try await ttsService.synthesize(document: document) { [weak self] segment, total in
+                self?.ttsState = .synthesizing(segment: segment, totalSegments: total)
+                let ratio = total > 0 ? Double(segment) / Double(total) : 0
+                self?.processingProgress = 0.6 + (0.2 * ratio)
+            }
+            ttsState = .completed(dub)
+            processingProgress = 0.8
+        } catch TTSError.offlineVietnameseVoiceMissing {
+            ttsState = .voiceMissing
+        } catch {
+            ttsState = .failed(error.localizedDescription)
         }
     }
 

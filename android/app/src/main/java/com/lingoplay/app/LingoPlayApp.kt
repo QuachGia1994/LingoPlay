@@ -128,6 +128,11 @@ fun LingoPlayApp() {
     var translationError by rememberSaveable { mutableStateOf<String?>(null) }
     var translationBatch by rememberSaveable { mutableStateOf(0) }
     var translationBatchTotal by rememberSaveable { mutableStateOf(0) }
+    var ttsPhaseName by rememberSaveable { mutableStateOf(TTSPhase.IDLE.name) }
+    var dubSpeechDocument by remember { mutableStateOf<DubSpeechDocument?>(null) }
+    var ttsError by rememberSaveable { mutableStateOf<String?>(null) }
+    var ttsSegment by rememberSaveable { mutableStateOf(0) }
+    var ttsSegmentTotal by rememberSaveable { mutableStateOf(0) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -136,6 +141,7 @@ fun LingoPlayApp() {
     val preparationState = MediaPreparationState.valueOf(mediaState)
     val asrPhase = ASRPhase.valueOf(asrPhaseName)
     val translationPhase = TranslationPhase.valueOf(translationPhaseName)
+    val ttsPhase = TTSPhase.valueOf(ttsPhaseName)
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -152,6 +158,11 @@ fun LingoPlayApp() {
         translationError = null
         translationBatch = 0
         translationBatchTotal = 0
+        ttsPhaseName = TTSPhase.IDLE.name
+        dubSpeechDocument = null
+        ttsError = null
+        ttsSegment = 0
+        ttsSegmentTotal = 0
         scope.launch {
             try {
                 selectedMedia = LocalMediaRepository.inspect(context, uri)
@@ -201,6 +212,23 @@ fun LingoPlayApp() {
                             }
                         }
                         translationPhaseName = TranslationPhase.COMPLETED.name
+                        val translated = translationDocument ?: error("Translation document was not retained.")
+                        try {
+                            ttsPhaseName = TTSPhase.SYNTHESIZING.name
+                            ttsError = null
+                            dubSpeechDocument = SystemVietnameseTTSService.synthesize(context, translated) { segment, total ->
+                                withContext(Dispatchers.Main.immediate) {
+                                    ttsSegment = segment
+                                    ttsSegmentTotal = total
+                                }
+                            }
+                            ttsPhaseName = TTSPhase.COMPLETED.name
+                        } catch (_: OfflineVietnameseVoiceMissingException) {
+                            ttsPhaseName = TTSPhase.VOICE_MISSING.name
+                        } catch (error: Throwable) {
+                            ttsPhaseName = TTSPhase.FAILED.name
+                            ttsError = error.message ?: "Vietnamese speech synthesis failed."
+                        }
                     }
                 }
             } catch (error: Throwable) {
@@ -264,6 +292,11 @@ fun LingoPlayApp() {
                         translationError = translationError,
                         translationBatch = translationBatch,
                         translationBatchTotal = translationBatchTotal,
+                        ttsPhase = ttsPhase,
+                        dubSpeech = dubSpeechDocument,
+                        ttsError = ttsError,
+                        ttsSegment = ttsSegment,
+                        ttsSegmentTotal = ttsSegmentTotal,
                         onBack = { stageName = Stage.HOME.name },
                     )
 
@@ -422,6 +455,11 @@ private fun ProcessingScreen(
     translationError: String?,
     translationBatch: Int,
     translationBatchTotal: Int,
+    ttsPhase: TTSPhase,
+    dubSpeech: DubSpeechDocument?,
+    ttsError: String?,
+    ttsSegment: Int,
+    ttsSegmentTotal: Int,
     onBack: () -> Unit,
 ) {
     ScreenScroll {
@@ -431,13 +469,15 @@ private fun ProcessingScreen(
         }
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             val progress = when {
+                ttsPhase == TTSPhase.COMPLETED -> 0.80f
+                ttsPhase == TTSPhase.SYNTHESIZING && ttsSegmentTotal > 0 -> 0.60f + (0.20f * ttsSegment.toFloat() / ttsSegmentTotal.toFloat())
                 translationPhase == TranslationPhase.COMPLETED -> 0.60f
                 translationPhase == TranslationPhase.TRANSLATING && translationBatchTotal > 0 -> 0.40f + (0.20f * translationBatch.toFloat() / translationBatchTotal.toFloat())
                 asrPhase == ASRPhase.COMPLETED -> 0.40f
                 mediaState == MediaPreparationState.AUDIO_READY -> 0.20f
                 else -> 0.05f
             }
-            Text(processingTitle(mediaState, asrPhase, translationPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(processingTitle(mediaState, asrPhase, translationPhase, ttsPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("${(progress * 100).toInt()}%", color = LpCyan, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             LinearProgressIndicator(
                 progress = { progress },
@@ -454,7 +494,7 @@ private fun ProcessingScreen(
             CardDivider()
             ProcessingRow("Translating", translationProcessState(translationPhase))
             CardDivider()
-            ProcessingRow("Creating Vietnamese voice", ProcessState.PENDING)
+            ProcessingRow("Creating Vietnamese voice", ttsProcessState(ttsPhase))
             CardDivider()
             ProcessingRow("Mixing audio", ProcessState.PENDING)
         }
@@ -495,6 +535,24 @@ private fun ProcessingScreen(
             }
         }
 
+        if (dubSpeech != null && ttsPhase == TTSPhase.COMPLETED) {
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Vietnamese voice ready", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("${dubSpeech.segments.size} clips", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("Offline system voice · ${dubSpeech.voiceName}", fontSize = 12.sp)
+                Text("${dubSpeech.totalTailSilenceMs} ms timeline silence reserved · no spoken words truncated", color = LpSecondaryText, fontSize = 10.sp)
+            }
+        }
+
+        if (ttsPhase == TTSPhase.VOICE_MISSING) {
+            LpCard {
+                Text("No offline Vietnamese system voice is installed. LingoPlay will not use a network-required TTS voice for this local dubbing path.", color = LpSecondaryText, fontSize = 12.sp)
+            }
+        }
+
         LpCard {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Info, contentDescription = null, tint = LpCyan)
@@ -511,10 +569,13 @@ private fun ProcessingScreen(
         translationError?.let { error ->
             LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
+        ttsError?.let { error ->
+            LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
     }
 }
 
-private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase): String = when (mediaState) {
+private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase, ttsPhase: TTSPhase): String = when (mediaState) {
     MediaPreparationState.EXTRACTING_AUDIO -> "Preparing local audio"
     MediaPreparationState.AUDIO_READY -> when (asrPhase) {
         ASRPhase.MODEL_MISSING -> "Audio ready · speech model not installed"
@@ -522,7 +583,13 @@ private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhas
         ASRPhase.TRANSCRIBING -> "Understanding speech on-device"
         ASRPhase.COMPLETED -> when (translationPhase) {
             TranslationPhase.TRANSLATING -> "Translating transcript"
-            TranslationPhase.COMPLETED -> "Vietnamese translation ready"
+            TranslationPhase.COMPLETED -> when (ttsPhase) {
+                TTSPhase.SYNTHESIZING -> "Creating Vietnamese voice on-device"
+                TTSPhase.COMPLETED -> "Vietnamese voice ready"
+                TTSPhase.VOICE_MISSING -> "Translation ready · offline voice not installed"
+                TTSPhase.FAILED -> "Vietnamese voice synthesis stopped"
+                TTSPhase.IDLE -> "Vietnamese translation ready"
+            }
             TranslationPhase.ENDPOINT_MISSING -> "Speech ready · translation not configured"
             TranslationPhase.FAILED -> "Translation stopped"
             else -> "Speech recognized locally"
@@ -555,6 +622,14 @@ private fun translationProcessState(state: TranslationPhase): ProcessState = whe
     TranslationPhase.ENDPOINT_MISSING -> ProcessState.CONFIGURATION_MISSING
     TranslationPhase.FAILED -> ProcessState.FAILED
     TranslationPhase.IDLE -> ProcessState.PENDING
+}
+
+private fun ttsProcessState(state: TTSPhase): ProcessState = when (state) {
+    TTSPhase.SYNTHESIZING -> ProcessState.ACTIVE
+    TTSPhase.COMPLETED -> ProcessState.COMPLETE
+    TTSPhase.VOICE_MISSING -> ProcessState.VOICE_MISSING
+    TTSPhase.FAILED -> ProcessState.FAILED
+    TTSPhase.IDLE -> ProcessState.PENDING
 }
 
 @Composable
@@ -859,7 +934,7 @@ private fun PrepareRow(icon: ImageVector, title: String, value: String, detail: 
     }
 }
 
-private enum class ProcessState { COMPLETE, ACTIVE, PENDING, BLOCKED, CONFIGURATION_MISSING, FAILED }
+private enum class ProcessState { COMPLETE, ACTIVE, PENDING, BLOCKED, CONFIGURATION_MISSING, VOICE_MISSING, FAILED }
 
 @Composable
 private fun ProcessingRow(title: String, state: ProcessState) {
@@ -868,7 +943,7 @@ private fun ProcessingRow(title: String, state: ProcessState) {
             ProcessState.COMPLETE -> Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = LpCyan, modifier = Modifier.size(22.dp))
             ProcessState.ACTIVE -> Box(modifier = Modifier.size(22.dp).border(2.dp, LpCyan, CircleShape))
             ProcessState.PENDING -> Icon(Icons.Rounded.RadioButtonUnchecked, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
-            ProcessState.BLOCKED, ProcessState.CONFIGURATION_MISSING -> Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
+            ProcessState.BLOCKED, ProcessState.CONFIGURATION_MISSING, ProcessState.VOICE_MISSING -> Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpSecondaryText, modifier = Modifier.size(22.dp))
             ProcessState.FAILED -> Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(12.dp))
@@ -880,6 +955,7 @@ private fun ProcessingRow(title: String, state: ProcessState) {
                 ProcessState.PENDING -> "Pending"
                 ProcessState.BLOCKED -> "ASR not installed"
                 ProcessState.CONFIGURATION_MISSING -> "Not configured"
+                ProcessState.VOICE_MISSING -> "Voice not installed"
                 ProcessState.FAILED -> "Failed"
             },
             color = LpSecondaryText,

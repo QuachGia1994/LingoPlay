@@ -14,10 +14,14 @@ All notable changes to LingoPlay are documented here.
 - Minimal JSON-only backend boundary for translation and entitlement requests.
 - Native transcript translation clients on iOS and Android with bounded segment batching, timestamp preservation, explicit endpoint-missing/failure states, and Vietnamese translation previews.
 - Translation proxy contract tests proving only transcript JSON is forwarded and malformed provider output is rejected rather than fabricated.
+- Local Vietnamese system-TTS stage on iOS and Android, including per-segment audio files, measured duration fitting, capped speech-rate retries, and explicit timeline silence instead of truncating words.
+- Android offline-voice enforcement: network-required TTS voices are rejected from the local dubbing pipeline and the TTS service query is declared for modern package visibility.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
 - Processing now continues from real audio preparation into real local ASR and then transcript-only translation when the corresponding model/backend are configured; missing infrastructure stops honestly without fake progress or output.
-- Translation batches are capped below backend limits and preserve stable segment IDs plus source timing for the upcoming TTS/duration-fit stage.
+- Translation batches are capped below backend limits and preserve stable segment IDs plus source timing for TTS/duration fitting.
+- Processing now advances to 80% only after real local Vietnamese speech clips are synthesized; mixing/remux remain pending and are not represented by fake progress.
+- Overlong translated speech retries up to a 1.75× safe rate cap; under-length segments reserve explicit tail silence for the upcoming timeline mixer.
 - Android Whisper audio decoding is bounded to 25-second chunks to avoid full-podcast PCM memory growth and the sherpa Whisper stream limit.
 - Android build configuration now uses AGP 9 built-in Kotlin instead of the incompatible kotlin-android plugin.

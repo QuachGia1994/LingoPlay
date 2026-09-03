@@ -288,7 +288,7 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Translating", state: translationStageState)
                     Divider().overlay(LPTheme.border)
-                    ProcessingStageRow(title: "Creating Vietnamese voice", state: .pending)
+                    ProcessingStageRow(title: "Creating Vietnamese voice", state: ttsStageState)
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Mixing audio", state: .pending)
                 }
@@ -355,6 +355,33 @@ struct ProcessingView: View {
                         .lpCard()
                 }
 
+                if case .completed(let dub) = model.ttsState {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Vietnamese voice ready", systemImage: "waveform.circle.fill")
+                                .font(.headline)
+                                .foregroundStyle(LPTheme.accent)
+                            Spacer()
+                            Text("\(dub.segments.count) clips")
+                                .font(.caption2.bold())
+                                .foregroundStyle(LPTheme.cyan)
+                        }
+                        Text("System voice · \(dub.voiceIdentifier)")
+                            .font(.caption)
+                        Text("\(dub.totalTailSilenceMs) ms timeline silence reserved · no spoken words truncated")
+                            .font(.caption2)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .lpCard()
+                }
+
+                if case .voiceMissing = model.ttsState {
+                    Text("No Vietnamese system voice is installed. Install a Vietnamese voice in iOS speech settings before local dubbing.")
+                        .font(.caption)
+                        .foregroundStyle(LPTheme.secondaryText)
+                        .lpCard()
+                }
+
                 if case .failed(let message) = model.mediaState {
                     Text(message)
                         .font(.caption)
@@ -370,6 +397,13 @@ struct ProcessingView: View {
                 }
 
                 if case .failed(let message) = model.translationState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lpCard()
+                }
+
+                if case .failed(let message) = model.ttsState {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -394,7 +428,14 @@ struct ProcessingView: View {
             case .completed:
                 switch model.translationState {
                 case .translating: return "Translating transcript"
-                case .completed: return "Vietnamese translation ready"
+                case .completed:
+                    switch model.ttsState {
+                    case .synthesizing: return "Creating Vietnamese voice on-device"
+                    case .completed: return "Vietnamese voice ready"
+                    case .voiceMissing: return "Translation ready · Vietnamese voice not installed"
+                    case .failed: return "Vietnamese voice synthesis stopped"
+                    case .idle: return "Vietnamese translation ready"
+                    }
                 case .endpointMissing: return "Speech ready · translation not configured"
                 case .failed: return "Translation stopped"
                 case .idle: return "Speech recognized locally"
@@ -437,6 +478,16 @@ struct ProcessingView: View {
         case .idle: .pending
         }
     }
+
+    private var ttsStageState: ProcessingStageRow.State {
+        switch model.ttsState {
+        case .voiceMissing: .voiceMissing
+        case .synthesizing: .active
+        case .completed: .complete
+        case .failed: .failed
+        case .idle: .pending
+        }
+    }
 }
 
 private struct ProcessingStageRow: View {
@@ -446,6 +497,7 @@ private struct ProcessingStageRow: View {
         case pending
         case blocked
         case configurationMissing
+        case voiceMissing
         case failed
     }
 
@@ -463,14 +515,14 @@ private struct ProcessingStageRow: View {
                         .tint(LPTheme.cyan)
                 case .pending:
                     Image(systemName: "circle")
-                case .blocked, .configurationMissing:
+                case .blocked, .configurationMissing, .voiceMissing:
                     Image(systemName: "lock.circle")
                 case .failed:
                     Image(systemName: "exclamationmark.circle.fill")
                 }
             }
             .frame(width: 24)
-            .foregroundStyle((state == .pending || state == .blocked || state == .configurationMissing) ? LPTheme.secondaryText : (state == .failed ? .red : LPTheme.cyan))
+            .foregroundStyle((state == .pending || state == .blocked || state == .configurationMissing || state == .voiceMissing) ? LPTheme.secondaryText : (state == .failed ? .red : LPTheme.cyan))
 
             Text(title)
                 .font(.subheadline.weight(.medium))
@@ -489,6 +541,7 @@ private struct ProcessingStageRow: View {
         case .pending: "Pending"
         case .blocked: "ASR not installed"
         case .configurationMissing: "Not configured"
+        case .voiceMissing: "Voice not installed"
         case .failed: "Failed"
         }
     }
