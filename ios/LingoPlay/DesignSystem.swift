@@ -15,27 +15,13 @@ struct LPBrandMark: View {
     var compact = false
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: compact ? 14 : 24, style: .continuous)
-                .fill(LPTheme.surfaceStrong)
-                .overlay {
-                    RoundedRectangle(cornerRadius: compact ? 14 : 24, style: .continuous)
-                        .stroke(LPTheme.accent, lineWidth: 1.5)
-                }
-                .shadow(color: LPTheme.violet.opacity(0.25), radius: 18, x: -4, y: 3)
-                .shadow(color: LPTheme.cyan.opacity(0.18), radius: 18, x: 4, y: 3)
-
-            Image(systemName: "message.fill")
-                .font(.system(size: compact ? 24 : 42, weight: .semibold))
-                .foregroundStyle(LPTheme.accent)
-
-            Image(systemName: "play.fill")
-                .font(.system(size: compact ? 10 : 17, weight: .bold))
-                .foregroundStyle(.white)
-                .offset(y: compact ? -2 : -4)
-        }
-        .frame(width: compact ? 50 : 86, height: compact ? 50 : 86)
-        .accessibilityLabel("LingoPlay")
+        Image("LingoPlayMark")
+            .resizable()
+            .scaledToFit()
+            .frame(width: compact ? 50 : 86, height: compact ? 50 : 86)
+            .shadow(color: LPTheme.violet.opacity(0.24), radius: 18, x: -4, y: 3)
+            .shadow(color: LPTheme.cyan.opacity(0.18), radius: 18, x: 4, y: 3)
+            .accessibilityLabel("LingoPlay")
     }
 }
 

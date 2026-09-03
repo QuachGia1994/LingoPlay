@@ -76,9 +76,21 @@ struct HomeView: View {
                 LPSectionHeader(title: "Recent", trailing: "Local library")
 
                 VStack(spacing: 12) {
-                    ForEach(model.recentVideos) { video in
-                        RecentVideoRow(video: video) {
-                            model.previewResult()
+                    if model.libraryItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("No dubbed videos yet")
+                                .font(.headline)
+                            Text("Import and process a local video. Completed results are saved privately on this device.")
+                                .font(.caption)
+                                .foregroundStyle(LPTheme.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lpCard()
+                    } else {
+                        ForEach(model.libraryItems.prefix(3)) { item in
+                            SavedVideoRow(item: item) {
+                                Task { await model.openLibraryItem(item) }
+                            }
                         }
                     }
                 }
@@ -101,38 +113,64 @@ struct HomeView: View {
     }
 }
 
-private struct RecentVideoRow: View {
-    let video: AppModel.RecentVideo
+private struct SavedVideoRow: View {
+    let item: LocalLibraryItem
+    let shareURL: URL?
+    let onDelete: (() -> Void)?
     let action: () -> Void
 
+    init(
+        item: LocalLibraryItem,
+        shareURL: URL? = nil,
+        onDelete: (() -> Void)? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.item = item
+        self.shareURL = shareURL
+        self.onDelete = onDelete
+        self.action = action
+    }
+
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                VideoPlaceholder(width: 92, height: 62)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(video.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text("\(video.duration)  •  \(video.languagePair)")
-                        .font(.caption)
-                        .foregroundStyle(LPTheme.secondaryText)
-                    if let progress = video.progress {
-                        ProgressView(value: progress)
-                            .tint(LPTheme.cyan)
-                    } else {
-                        Text("Completed")
+        HStack(spacing: 12) {
+            Button(action: action) {
+                HStack(spacing: 14) {
+                    VideoPlaceholder(width: 92, height: 62)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text("\(item.durationText)  •  \(item.languagePair)")
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                        Text("Saved locally")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(LPTheme.cyan)
                     }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(LPTheme.secondaryText)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-                    .foregroundStyle(LPTheme.secondaryText)
             }
-            .lpCard()
+            .buttonStyle(.plain)
+
+            if let shareURL {
+                ShareLink(item: shareURL) {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundStyle(LPTheme.cyan)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let onDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
+        .lpCard()
     }
 }
 
@@ -599,14 +637,14 @@ struct PlayerView: View {
         ScrollView {
             VStack(spacing: 18) {
                 ScreenHeader(title: model.selectedMedia?.title ?? "Preview", backAction: model.returnHome) {
-                    Text(model.processedMedia == nil ? "Demo UI" : "Vietnamese AI")
+                    Text(model.videoPlayer == nil ? "Preview" : (model.liveBlendAvailable ? "Vietnamese AI" : "Saved Dub"))
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(LPTheme.violet.opacity(0.35), in: Capsule())
                 }
 
-                if let player = model.videoPlayer, model.processedMedia != nil {
+                if let player = model.videoPlayer {
                     ZStack(alignment: .bottom) {
                         LocalVideoSurface(player: player)
                             .frame(height: 250)
@@ -634,16 +672,16 @@ struct PlayerView: View {
                 } else {
                     VideoPlaceholder(width: nil, height: 250)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Demo navigation only")
+                        Text("No dubbed video selected")
                             .font(.headline)
-                        Text("Import and process a local video to use real dubbed playback and the live Original ↔ Dub blend.")
+                        Text("Import a local video or choose a saved result from Library.")
                             .font(.caption)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
                     .lpCard()
                 }
 
-                if model.processedMedia != nil {
+                if model.videoPlayer != nil {
                     VStack(spacing: 8) {
                         Slider(value: playbackFraction)
                             .tint(LPTheme.cyan)
@@ -669,13 +707,13 @@ struct PlayerView: View {
                         Text("Audio blend")
                             .font(.headline)
                         Spacer()
-                        Text("\(Int(model.audioBlend * 100))% Dub")
+                        Text(model.liveBlendAvailable ? "\(Int(model.audioBlend * 100))% Dub" : "Final mix")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(LPTheme.cyan)
                     }
                     Slider(value: $model.audioBlend, in: 0...1)
                         .tint(LPTheme.cyan)
-                        .disabled(model.processedMedia == nil)
+                        .disabled(!model.liveBlendAvailable)
                     HStack {
                         Text("Original")
                         Spacer()
@@ -690,7 +728,24 @@ struct PlayerView: View {
                     PlayerAction(icon: "captions.bubble.fill", label: "Subtitles")
                     PlayerAction(icon: "waveform", label: "Blend")
                     PlayerAction(icon: "speedometer", label: String(format: "%.1fx", model.playbackSpeed))
-                    PlayerAction(icon: "arrow.down.circle.fill", label: "Offline")
+                    if let url = model.activeLibraryURL {
+                        ShareLink(item: url) {
+                            PlayerAction(icon: "square.and.arrow.up", label: "Share")
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        PlayerAction(icon: "arrow.down.circle.fill", label: "Offline")
+                    }
+                }
+
+                if let item = model.activeLibraryItem {
+                    Button(role: .destructive) {
+                        Task { await model.deleteLibraryItem(item) }
+                    } label: {
+                        Label("Delete from LingoPlay", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
             .padding(18)
@@ -800,17 +855,31 @@ struct LibraryView: View {
                         .foregroundStyle(LPTheme.cyan)
                 }
 
-                ForEach(model.recentVideos.prefix(offlineOnly ? 2 : model.recentVideos.count)) { video in
-                    RecentVideoRow(video: video) {
-                        model.previewResult()
+                if model.libraryItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nothing saved yet")
+                            .font(.headline)
+                        Text("Completed dubs appear here automatically after local processing finishes.")
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lpCard()
+                } else {
+                    ForEach(model.libraryItems) { item in
+                        SavedVideoRow(
+                            item: item,
+                            shareURL: model.libraryURLs[item.id],
+                            onDelete: { Task { await model.deleteLibraryItem(item) } }
+                        ) {
+                            Task { await model.openLibraryItem(item) }
+                        }
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 11) {
-                    LPSectionHeader(title: "Storage", trailing: "45 GB of 128 GB")
-                    ProgressView(value: 0.35)
-                        .tint(LPTheme.cyan)
-                    Text("AI models and translated media stay on this device.")
+                    LPSectionHeader(title: "Saved media", trailing: MediaFormatting.bytes(model.libraryBytes))
+                    Text("\(model.libraryItems.count) local dubbed video\(model.libraryItems.count == 1 ? "" : "s") · stored only in LingoPlay app storage")
                         .font(.caption)
                         .foregroundStyle(LPTheme.secondaryText)
                 }

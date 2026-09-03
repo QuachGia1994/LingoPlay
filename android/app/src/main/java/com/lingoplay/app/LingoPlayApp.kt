@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,10 +32,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Home
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
@@ -72,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -83,7 +86,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,19 +101,6 @@ import kotlinx.coroutines.withContext
 
 private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER }
 private enum class Tab { HOME, LIBRARY, OFFLINE, SETTINGS }
-
-private data class DemoVideo(
-    val title: String,
-    val duration: String,
-    val languagePair: String,
-    val progress: Float? = null,
-)
-
-private val demoVideos = listOf(
-    DemoVideo("The Future of AI", "01:24:32", "EN → VI"),
-    DemoVideo("Space Documentary", "00:48:10", "EN → VI"),
-    DemoVideo("Marketing Strategy", "00:32:45", "EN → VI", 0.65f),
-)
 
 private val accentBrush = Brush.horizontalGradient(listOf(LpViolet, LpBlue, LpCyan))
 
@@ -138,6 +130,8 @@ fun LingoPlayApp() {
     var mixPhaseName by rememberSaveable { mutableStateOf(MixPhase.IDLE.name) }
     var mixResult by remember { mutableStateOf<LocalDubMediaResult?>(null) }
     var mixError by rememberSaveable { mutableStateOf<String?>(null) }
+    var libraryItems by remember { mutableStateOf<List<LocalLibraryItem>>(emptyList()) }
+    var activeLibraryItem by remember { mutableStateOf<LocalLibraryItem?>(null) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -172,6 +166,7 @@ fun LingoPlayApp() {
         mixPhaseName = MixPhase.IDLE.name
         mixResult = null
         mixError = null
+        activeLibraryItem = null
         scope.launch {
             try {
                 selectedMedia = LocalMediaRepository.inspect(context, uri)
@@ -185,6 +180,7 @@ fun LingoPlayApp() {
     }
 
     LaunchedEffect(Unit) {
+        libraryItems = LocalLibraryStore.load(context)
         if (stageName == Stage.SPLASH.name) {
             delay(900)
             stageName = Stage.HOME.name
@@ -235,11 +231,17 @@ fun LingoPlayApp() {
                             val dub = dubSpeechDocument ?: error("Vietnamese speech document was not retained.")
                             try {
                                 mixError = null
-                                mixResult = TimelineMixService.render(context, media, dub) { phase ->
+                                val rendered = TimelineMixService.render(context, media, dub) { phase ->
                                     withContext(Dispatchers.Main.immediate) {
                                         mixPhaseName = phase.name
                                     }
                                 }
+                                val saved = LocalLibraryStore.save(context, media, rendered, translationDocument)
+                                libraryItems = LocalLibraryStore.load(context)
+                                activeLibraryItem = saved
+                                selectedMedia = LocalLibraryStore.importedMedia(saved)
+                                translationDocument = saved.asTranslationDocument()
+                                mixResult = saved.asProcessedResult()
                                 mixPhaseName = MixPhase.COMPLETED.name
                                 delay(300)
                                 stageName = Stage.PLAYER.name
@@ -333,23 +335,69 @@ fun LingoPlayApp() {
                         translation = translationDocument,
                         audioBlend = audioBlend,
                         onAudioBlendChange = { audioBlend = it },
+                        onShare = {
+                            activeLibraryItem?.let { item ->
+                                context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
+                            }
+                        },
                         onBack = { stageName = Stage.HOME.name },
                     )
 
                     Stage.HOME -> when (tab) {
                         Tab.HOME -> HomeScreen(
+                            items = libraryItems,
                             onImport = { mediaPicker.launch(arrayOf("video/*")) },
-                            onOpenVideo = { stageName = Stage.PLAYER.name },
+                            onOpenItem = { item ->
+                                activeLibraryItem = item
+                                selectedMedia = LocalLibraryStore.importedMedia(item)
+                                mixResult = item.asProcessedResult()
+                                translationDocument = item.asTranslationDocument()
+                                stageName = Stage.PLAYER.name
+                            },
                         )
 
                         Tab.LIBRARY -> LibraryScreen(
                             offlineOnly = false,
-                            onOpenVideo = { stageName = Stage.PLAYER.name },
+                            items = libraryItems,
+                            onOpenItem = { item ->
+                                activeLibraryItem = item
+                                selectedMedia = LocalLibraryStore.importedMedia(item)
+                                mixResult = item.asProcessedResult()
+                                translationDocument = item.asTranslationDocument()
+                                stageName = Stage.PLAYER.name
+                            },
+                            onShare = { item ->
+                                context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
+                            },
+                            onDelete = { item ->
+                                scope.launch {
+                                    LocalLibraryStore.delete(context, item)
+                                    libraryItems = LocalLibraryStore.load(context)
+                                    if (activeLibraryItem?.id == item.id) activeLibraryItem = null
+                                }
+                            },
                         )
 
                         Tab.OFFLINE -> LibraryScreen(
                             offlineOnly = true,
-                            onOpenVideo = { stageName = Stage.PLAYER.name },
+                            items = libraryItems,
+                            onOpenItem = { item ->
+                                activeLibraryItem = item
+                                selectedMedia = LocalLibraryStore.importedMedia(item)
+                                mixResult = item.asProcessedResult()
+                                translationDocument = item.asTranslationDocument()
+                                stageName = Stage.PLAYER.name
+                            },
+                            onShare = { item ->
+                                context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
+                            },
+                            onDelete = { item ->
+                                scope.launch {
+                                    LocalLibraryStore.delete(context, item)
+                                    libraryItems = LocalLibraryStore.load(context)
+                                    if (activeLibraryItem?.id == item.id) activeLibraryItem = null
+                                }
+                            },
                         )
 
                         Tab.SETTINGS -> SettingsScreen(
@@ -396,7 +444,11 @@ private fun SplashScreen() {
 }
 
 @Composable
-private fun HomeScreen(onImport: () -> Unit, onOpenVideo: () -> Unit) {
+private fun HomeScreen(
+    items: List<LocalLibraryItem>,
+    onImport: () -> Unit,
+    onOpenItem: (LocalLibraryItem) -> Unit,
+) {
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
@@ -426,8 +478,15 @@ private fun HomeScreen(onImport: () -> Unit, onOpenVideo: () -> Unit) {
         }
 
         SectionHeader("Recent", "Local library")
-        demoVideos.forEach { video ->
-            RecentVideoRow(video, onOpenVideo)
+        if (items.isEmpty()) {
+            LpCard {
+                Text("No dubbed videos yet", fontWeight = FontWeight.Bold)
+                Text("Import and process a local video. Completed results are saved privately on this device.", color = LpSecondaryText, fontSize = 12.sp)
+            }
+        } else {
+            items.take(3).forEach { item ->
+                LibraryItemRow(item = item, onOpen = { onOpenItem(item) })
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -703,6 +762,7 @@ private fun PlayerScreen(
     translation: TranslationDocument?,
     audioBlend: Float,
     onAudioBlendChange: (Float) -> Unit,
+    onShare: () -> Unit,
     onBack: () -> Unit,
 ) {
     ScreenScroll {
@@ -762,7 +822,7 @@ private fun PlayerScreen(
             PlayerAction(Icons.Rounded.ClosedCaption, "Subtitles", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Tune, "Mixed", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Speed, "1.0x", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.Download, "Offline", Modifier.weight(1f))
+            PlayerAction(Icons.Rounded.Share, "Share", Modifier.weight(1f), onShare)
         }
     }
 }
@@ -775,7 +835,7 @@ private fun SingleClockDubPlayer(
     var videoView by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf<VideoView?>(null) }
     var videoReady by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
-    var currentMs by remember { mutableStateOf(0) }
+    var currentMs by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(isPlaying, videoView) {
         while (isPlaying) {
@@ -883,30 +943,43 @@ private fun SingleClockDubPlayer(
 }
 
 @Composable
-private fun LibraryScreen(offlineOnly: Boolean, onOpenVideo: () -> Unit) {
+private fun LibraryScreen(
+    offlineOnly: Boolean,
+    items: List<LocalLibraryItem>,
+    onOpenItem: (LocalLibraryItem) -> Unit,
+    onShare: (LocalLibraryItem) -> Unit,
+    onDelete: (LocalLibraryItem) -> Unit,
+) {
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text(if (offlineOnly) "Offline" else "Library", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                Text(if (offlineOnly) "Ready without a connection" else "Your translated videos", color = LpSecondaryText, fontSize = 12.sp)
+                Text(if (offlineOnly) "Saved locally and ready without a connection" else "Your translated videos", color = LpSecondaryText, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
-            Icon(if (offlineOnly) Icons.Rounded.CloudDownload else Icons.Rounded.Search, contentDescription = null, tint = LpCyan)
+            Icon(if (offlineOnly) Icons.Rounded.CloudDownload else Icons.Rounded.VideoLibrary, contentDescription = null, tint = LpCyan)
         }
 
-        demoVideos.take(if (offlineOnly) 2 else demoVideos.size).forEach { video ->
-            RecentVideoRow(video, onOpenVideo)
+        if (items.isEmpty()) {
+            LpCard {
+                Text("Nothing saved yet", fontWeight = FontWeight.Bold)
+                Text("Completed dubs appear here automatically after local processing finishes.", color = LpSecondaryText, fontSize = 12.sp)
+            }
+        } else {
+            items.forEach { item ->
+                LibraryItemRow(
+                    item = item,
+                    onOpen = { onOpenItem(item) },
+                    onShare = { onShare(item) },
+                    onDelete = { onDelete(item) },
+                )
+            }
         }
 
+        val totalBytes = LocalLibraryStore.totalBytes(items)
         LpCard {
-            SectionHeader("Storage", "45 GB of 128 GB")
-            LinearProgressIndicator(
-                progress = { 0.35f },
-                modifier = Modifier.fillMaxWidth(),
-                color = LpCyan,
-                trackColor = LpSurfaceStrong,
-            )
-            Text("AI models and translated media stay on this device.", color = LpSecondaryText, fontSize = 12.sp)
+            SectionHeader("Saved media", "${MediaFormatting.bytes(totalBytes)}")
+            Text("${items.size} local dubbed video${if (items.size == 1) "" else "s"} · stored only in LingoPlay app storage", color = LpSecondaryText, fontSize = 12.sp)
         }
     }
 }
@@ -1010,14 +1083,12 @@ private fun LpCard(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun BrandMark(size: androidx.compose.ui.unit.Dp = 78.dp) {
-    val shape = RoundedCornerShape(size * 0.28f)
-    Box(
-        modifier = Modifier.size(size).clip(shape).background(LpSurfaceStrong).border(1.5.dp, accentBrush, shape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Rounded.ChatBubble, contentDescription = "LingoPlay", tint = LpCyan, modifier = Modifier.size(size * 0.56f))
-        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(size * 0.27f))
-    }
+    Image(
+        painter = painterResource(R.drawable.lingoplay_mark),
+        contentDescription = "LingoPlay",
+        modifier = Modifier.size(size),
+        contentScale = ContentScale.Fit,
+    )
 }
 
 @Composable
@@ -1068,24 +1139,34 @@ private fun VideoPlaceholder(height: androidx.compose.ui.unit.Dp) {
 }
 
 @Composable
-private fun RecentVideoRow(video: DemoVideo, action: () -> Unit) {
+private fun LibraryItemRow(
+    item: LocalLibraryItem,
+    onOpen: () -> Unit,
+    onShare: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = action).border(1.dp, LpBorder, RoundedCornerShape(20.dp)),
+        modifier = Modifier.fillMaxWidth().border(1.dp, LpBorder, RoundedCornerShape(20.dp)),
         color = LpSurface.copy(alpha = 0.88f),
         shape = RoundedCornerShape(20.dp),
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(modifier = Modifier.size(width = 92.dp, height = 62.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Color(0xFF12314C), Color(0xFF351B48), Color(0xFF0B3A43)))), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White)
+            Box(
+                modifier = Modifier.size(width = 92.dp, height = 62.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Color(0xFF12314C), Color(0xFF351B48), Color(0xFF0B3A43)))).clickable(onClick = onOpen),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play ${item.title}", tint = Color.White)
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(video.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${video.duration}  •  ${video.languagePair}", color = LpSecondaryText, fontSize = 11.sp)
-                if (video.progress != null) {
-                    LinearProgressIndicator(progress = { video.progress }, modifier = Modifier.fillMaxWidth(), color = LpCyan, trackColor = LpSurfaceStrong)
-                } else {
-                    Text("Completed", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
+            Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${item.durationText}  •  ${item.languagePair}", color = LpSecondaryText, fontSize = 11.sp)
+                Text(MediaFormatting.bytes(item.sizeBytes), color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            if (onShare != null) {
+                Icon(Icons.Rounded.Share, contentDescription = "Share ${item.title}", tint = LpCyan, modifier = Modifier.size(20.dp).clickable(onClick = onShare))
+            }
+            if (onDelete != null) {
+                Icon(Icons.Rounded.Delete, contentDescription = "Delete ${item.title}", tint = LpSecondaryText, modifier = Modifier.size(20.dp).clickable(onClick = onDelete))
             }
         }
     }
@@ -1163,8 +1244,14 @@ private fun SubtitleRow(language: String, text: String) {
 }
 
 @Composable
-private fun PlayerAction(icon: ImageVector, label: String, modifier: Modifier) {
-    Surface(modifier = modifier, color = LpSurface, shape = RoundedCornerShape(16.dp)) {
+private fun PlayerAction(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier,
+    action: (() -> Unit)? = null,
+) {
+    val interactive = if (action != null) modifier.clickable(onClick = action) else modifier
+    Surface(modifier = interactive, color = LpSurface, shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Icon(icon, contentDescription = label, tint = LpCyan, modifier = Modifier.size(20.dp))
             Text(label, fontSize = 9.sp, maxLines = 1)

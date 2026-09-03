@@ -1,6 +1,6 @@
 # Visual foundation
 
-> updated 2026-09-03 · pre-release
+> updated 2026-09-04 · pre-release
 
 ## Product flow
 Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; it does not pretend AI models are loading before model integration exists.
@@ -15,7 +15,7 @@ Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; 
 - Dark graphite background with restrained purple→cyan accent.
 - Soft gradient/glass surfaces; video and primary action remain the strongest hierarchy.
 - Rounded media cards and bottom navigation.
-- Logo motif combines play, speech, and waveform cues without relying on external image assets in the first code foundation.
+- One generated LingoPlay play/speech/wave mark is shared by launcher icons, native launch surfaces, splash/loading UI, and in-app brand surfaces on iOS and Android.
 
 ## Interaction principles
 - No editor timeline, track inspector, codec controls, model selectors, or developer terminology.
@@ -29,6 +29,7 @@ Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; 
 - Prepare displays real selected filename, duration, size, and audio-track availability.
 - Processing step 1 reflects real local audio preparation; step 2 now reflects the real ASR model state and shows genuine local transcript evidence when an installed model succeeds.
 - When the speech model is absent, Processing shows a model-missing state and does not silently download one; when ASR completes, the screen exposes detected language, normalized text, and timestamped segment count.
-- Demo library/player content remains only for visual navigation and does not masquerade as generated output from the imported file.
+- Successful dubbed outputs are copied from temporary render cache into durable app-owned local storage with compact subtitle metadata; Home, Library, and Offline show only those real saved outputs.
+- Saved outputs can be reopened into the real player, shared/exported through the native system share surface, or deleted locally; empty library states never masquerade demo content as completed work.
 - Backend and frontend share the same trust-boundary language: media stays local; only JSON translation requests leave the device.
 - No scraping/downloader affordance is present.

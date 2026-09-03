@@ -24,7 +24,8 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: LingoPlay
         INFOPLIST_KEY_LingoPlayTranslationAPIBaseURL: "$(LINGOPLAY_TRANSLATION_API_BASE_URL)"
         LINGOPLAY_TRANSLATION_API_BASE_URL: ""
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES

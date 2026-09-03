@@ -31,22 +31,6 @@ final class AppModel {
         }
     }
 
-    struct RecentVideo: Identifiable {
-        let id: UUID
-        let title: String
-        let duration: String
-        let languagePair: String
-        let progress: Double?
-
-        init(title: String, duration: String, languagePair: String, progress: Double? = nil) {
-            id = UUID()
-            self.title = title
-            self.duration = duration
-            self.languagePair = languagePair
-            self.progress = progress
-        }
-    }
-
     var stage: Stage = .splash
     var selectedTab: Tab = .home
     var processingProgress = 0.0
@@ -64,6 +48,12 @@ final class AppModel {
     var ttsState: TTSState = .idle
     var mixState: MixState = .idle
     var processedMedia: LocalDubMediaResult?
+    var libraryItems: [LocalLibraryItem] = []
+    var libraryBytes: Int64 = 0
+    var libraryURLs: [UUID: URL] = [:]
+    var activeLibraryItem: LocalLibraryItem?
+    var activeLibraryURL: URL?
+    var liveBlendAvailable = false
     var videoPlayer: AVPlayer?
     var playbackPosition = 0.0
     var playbackDuration = 0.0
@@ -75,17 +65,13 @@ final class AppModel {
     private let translationService = TranslationService()
     private let ttsService = SystemVietnameseTTSService()
     private let timelineMixService = TimelineMixService()
+    private let libraryStore = LocalLibraryStore()
     private var playbackMixContext: PlaybackMixContext?
     private var playbackTimeObserver: Any?
 
-    let recentVideos = [
-        RecentVideo(title: "The Future of AI", duration: "01:24:32", languagePair: "EN → VI"),
-        RecentVideo(title: "Space Documentary", duration: "00:48:10", languagePair: "EN → VI"),
-        RecentVideo(title: "Marketing Strategy", duration: "00:32:45", languagePair: "EN → VI", progress: 0.65),
-    ]
-
     func finishSplash() {
         stage = .home
+        Task { await refreshLibrary() }
     }
 
     func beginImport() {
@@ -100,6 +86,9 @@ final class AppModel {
         ttsState = .idle
         mixState = .idle
         processedMedia = nil
+        activeLibraryItem = nil
+        activeLibraryURL = nil
+        liveBlendAvailable = false
         teardownPlayback()
         processingProgress = 0
         do {
@@ -214,6 +203,20 @@ final class AppModel {
                     break
                 }
             }
+            let translation: TranslationDocument?
+            if case .completed(let document) = translationState {
+                translation = document
+            } else {
+                translation = nil
+            }
+            let saved = try await libraryStore.save(
+                media: selectedMedia,
+                result: result,
+                translation: translation
+            )
+            activeLibraryItem = saved
+            activeLibraryURL = await libraryStore.videoURL(for: saved)
+            await refreshLibrary()
             processedMedia = result
             mixState = .completed(result)
             processingProgress = 1.0
@@ -230,11 +233,60 @@ final class AppModel {
         return URL(string: configured)
     }
 
-    func previewResult() {
-        pausePlayback()
+    func refreshLibrary() async {
+        guard let items = try? await libraryStore.load() else { return }
+        var urls: [UUID: URL] = [:]
+        for item in items {
+            urls[item.id] = await libraryStore.videoURL(for: item)
+        }
+        libraryItems = items
+        libraryBytes = await libraryStore.totalBytes(items)
+        libraryURLs = urls
+    }
+
+    func openLibraryItem(_ item: LocalLibraryItem) async {
+        guard let url = await libraryStore.videoURL(for: item),
+              FileManager.default.fileExists(atPath: url.path)
+        else {
+            await refreshLibrary()
+            return
+        }
+        let size = await libraryStore.fileSize(for: item)
+        activeLibraryItem = item
+        activeLibraryURL = url
+        selectedMedia = LocalMediaItem(
+            id: item.id,
+            localURL: url,
+            title: item.title,
+            duration: item.duration,
+            fileSizeBytes: size,
+            hasAudioTrack: true
+        )
         processedMedia = nil
-        teardownPlayback()
+        if item.segments.isEmpty {
+            translationState = .idle
+        } else {
+            translationState = .completed(
+                TranslationDocument(
+                    sourceLanguage: item.sourceLanguage,
+                    targetLanguage: item.targetLanguage,
+                    segments: item.segments
+                )
+            )
+        }
+        configureSavedPlayback(url: url, duration: item.duration)
         stage = .player
+    }
+
+    func deleteLibraryItem(_ item: LocalLibraryItem) async {
+        try? await libraryStore.delete(item)
+        if activeLibraryItem?.id == item.id {
+            activeLibraryItem = nil
+            activeLibraryURL = nil
+            teardownPlayback()
+            stage = .home
+        }
+        await refreshLibrary()
     }
 
     func togglePlayback() {
@@ -281,10 +333,25 @@ final class AppModel {
         let player = AVPlayer(playerItem: session.item)
         videoPlayer = player
         playbackMixContext = session.mixContext
+        liveBlendAvailable = true
         playbackDuration = max(0, result.duration)
         playbackPosition = 0
         isPlaying = false
+        installPlaybackObserver(on: player)
+    }
 
+    private func configureSavedPlayback(url: URL, duration: TimeInterval) {
+        teardownPlayback()
+        let player = AVPlayer(url: url)
+        videoPlayer = player
+        playbackDuration = max(0, duration)
+        playbackPosition = 0
+        isPlaying = false
+        liveBlendAvailable = false
+        installPlaybackObserver(on: player)
+    }
+
+    private func installPlaybackObserver(on player: AVPlayer) {
         let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
@@ -315,6 +382,7 @@ final class AppModel {
         }
         playbackTimeObserver = nil
         playbackMixContext = nil
+        liveBlendAvailable = false
         videoPlayer = nil
         playbackPosition = 0
         playbackDuration = 0
