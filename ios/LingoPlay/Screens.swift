@@ -718,11 +718,10 @@ private struct ScreenHeader<Trailing: View>: View {
     }
 }
 
-private extension ScreenHeader where Trailing == Color {
+private extension ScreenHeader where Trailing == EmptyView {
     init(title: String, backAction: @escaping () -> Void) {
         self.init(title: title, backAction: backAction) {
-            Color.clear
-                .frame(width: 38, height: 1)
+            EmptyView()
         }
     }
 }

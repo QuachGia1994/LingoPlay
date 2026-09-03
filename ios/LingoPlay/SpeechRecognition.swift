@@ -41,7 +41,7 @@ enum ASRError: LocalizedError {
     }
 }
 
-struct ASRModelStore: Sendable {
+struct ASRModelStore {
     private let fileManager = FileManager.default
 
     func whisperModelFolder() -> URL? {
