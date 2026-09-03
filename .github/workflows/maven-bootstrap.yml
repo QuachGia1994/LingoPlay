@@ -40,7 +40,6 @@ jobs:
           ./gradlew.bat :app:dependencies --configuration debugRuntimeClasspath --stacktrace
           ./gradlew.bat :app:dependencies --configuration releaseCompileClasspath --stacktrace
           ./gradlew.bat :app:dependencies --configuration releaseRuntimeClasspath --stacktrace
-          ./gradlew.bat :app:dependencies --configuration testDebugUnitTestRuntimeClasspath --stacktrace
 
       - name: Package Maven cache
         shell: pwsh
