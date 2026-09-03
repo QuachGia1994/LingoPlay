@@ -33,13 +33,24 @@ jobs:
           cmd /c "echo y| sdkmanager.bat --licenses" | Out-Null
           sdkmanager.bat "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
 
-      - name: Prefetch Gradle plugins and Maven dependencies only
+      - name: Prefetch resolved Maven artifacts only
         shell: pwsh
         run: |
-          ./gradlew.bat :app:dependencies --configuration debugCompileClasspath --stacktrace
-          ./gradlew.bat :app:dependencies --configuration debugRuntimeClasspath --stacktrace
-          ./gradlew.bat :app:dependencies --configuration releaseCompileClasspath --stacktrace
-          ./gradlew.bat :app:dependencies --configuration releaseRuntimeClasspath --stacktrace
+          @'
+          gradle.afterProject { project, state ->
+              if (project.path == ':app') {
+                  project.tasks.register('prefetchArtifacts') {
+                      doLast {
+                          ['debugCompileClasspath', 'debugRuntimeClasspath', 'releaseCompileClasspath', 'releaseRuntimeClasspath'].each { name ->
+                              def files = project.configurations.getByName(name).files
+                              println("Resolved ${project.path}:${name} -> ${files.size()} files")
+                          }
+                      }
+                  }
+              }
+          }
+          '@ | Set-Content -Encoding UTF8 prefetch.init.gradle
+          ./gradlew.bat :app:prefetchArtifacts -I prefetch.init.gradle --stacktrace
 
       - name: Stop Gradle before cache upload
         shell: pwsh
