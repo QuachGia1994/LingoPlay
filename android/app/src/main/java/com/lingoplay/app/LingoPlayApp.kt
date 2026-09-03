@@ -1,6 +1,7 @@
 package com.lingoplay.app
 
 import android.content.Intent
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -84,6 +85,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -133,6 +135,9 @@ fun LingoPlayApp() {
     var ttsError by rememberSaveable { mutableStateOf<String?>(null) }
     var ttsSegment by rememberSaveable { mutableStateOf(0) }
     var ttsSegmentTotal by rememberSaveable { mutableStateOf(0) }
+    var mixPhaseName by rememberSaveable { mutableStateOf(MixPhase.IDLE.name) }
+    var mixResult by remember { mutableStateOf<LocalDubMediaResult?>(null) }
+    var mixError by rememberSaveable { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -142,6 +147,7 @@ fun LingoPlayApp() {
     val asrPhase = ASRPhase.valueOf(asrPhaseName)
     val translationPhase = TranslationPhase.valueOf(translationPhaseName)
     val ttsPhase = TTSPhase.valueOf(ttsPhaseName)
+    val mixPhase = MixPhase.valueOf(mixPhaseName)
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -163,6 +169,9 @@ fun LingoPlayApp() {
         ttsError = null
         ttsSegment = 0
         ttsSegmentTotal = 0
+        mixPhaseName = MixPhase.IDLE.name
+        mixResult = null
+        mixError = null
         scope.launch {
             try {
                 selectedMedia = LocalMediaRepository.inspect(context, uri)
@@ -223,6 +232,21 @@ fun LingoPlayApp() {
                                 }
                             }
                             ttsPhaseName = TTSPhase.COMPLETED.name
+                            val dub = dubSpeechDocument ?: error("Vietnamese speech document was not retained.")
+                            try {
+                                mixError = null
+                                mixResult = TimelineMixService.render(context, media, dub) { phase ->
+                                    withContext(Dispatchers.Main.immediate) {
+                                        mixPhaseName = phase.name
+                                    }
+                                }
+                                mixPhaseName = MixPhase.COMPLETED.name
+                                delay(300)
+                                stageName = Stage.PLAYER.name
+                            } catch (error: Throwable) {
+                                mixPhaseName = MixPhase.FAILED.name
+                                mixError = error.message ?: "Local audio mixing or video remux failed."
+                            }
                         } catch (_: OfflineVietnameseVoiceMissingException) {
                             ttsPhaseName = TTSPhase.VOICE_MISSING.name
                         } catch (error: Throwable) {
@@ -297,10 +321,16 @@ fun LingoPlayApp() {
                         ttsError = ttsError,
                         ttsSegment = ttsSegment,
                         ttsSegmentTotal = ttsSegmentTotal,
+                        mixPhase = mixPhase,
+                        mixResult = mixResult,
+                        mixError = mixError,
                         onBack = { stageName = Stage.HOME.name },
                     )
 
                     Stage.PLAYER -> PlayerScreen(
+                        media = selectedMedia,
+                        processed = mixResult,
+                        translation = translationDocument,
                         audioBlend = audioBlend,
                         onAudioBlendChange = { audioBlend = it },
                         onBack = { stageName = Stage.HOME.name },
@@ -460,6 +490,9 @@ private fun ProcessingScreen(
     ttsError: String?,
     ttsSegment: Int,
     ttsSegmentTotal: Int,
+    mixPhase: MixPhase,
+    mixResult: LocalDubMediaResult?,
+    mixError: String?,
     onBack: () -> Unit,
 ) {
     ScreenScroll {
@@ -469,6 +502,9 @@ private fun ProcessingScreen(
         }
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             val progress = when {
+                mixPhase == MixPhase.COMPLETED -> 1.00f
+                mixPhase == MixPhase.REMUXING -> 0.92f
+                mixPhase == MixPhase.RENDERING_AUDIO -> 0.85f
                 ttsPhase == TTSPhase.COMPLETED -> 0.80f
                 ttsPhase == TTSPhase.SYNTHESIZING && ttsSegmentTotal > 0 -> 0.60f + (0.20f * ttsSegment.toFloat() / ttsSegmentTotal.toFloat())
                 translationPhase == TranslationPhase.COMPLETED -> 0.60f
@@ -477,7 +513,7 @@ private fun ProcessingScreen(
                 mediaState == MediaPreparationState.AUDIO_READY -> 0.20f
                 else -> 0.05f
             }
-            Text(processingTitle(mediaState, asrPhase, translationPhase, ttsPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(processingTitle(mediaState, asrPhase, translationPhase, ttsPhase, mixPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("${(progress * 100).toInt()}%", color = LpCyan, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             LinearProgressIndicator(
                 progress = { progress },
@@ -496,7 +532,7 @@ private fun ProcessingScreen(
             CardDivider()
             ProcessingRow("Creating Vietnamese voice", ttsProcessState(ttsPhase))
             CardDivider()
-            ProcessingRow("Mixing audio", ProcessState.PENDING)
+            ProcessingRow("Mixing audio", mixProcessState(mixPhase))
         }
 
         if (transcript != null && asrPhase == ASRPhase.COMPLETED) {
@@ -553,6 +589,18 @@ private fun ProcessingScreen(
             }
         }
 
+        if (mixResult != null && mixPhase == MixPhase.COMPLETED) {
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Dubbed video ready", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("LOCAL", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("Video stream was remuxed without video transcoding.", fontSize = 12.sp)
+                Text("Original audio and Vietnamese dub remain separate for live blend control.", color = LpSecondaryText, fontSize = 10.sp)
+            }
+        }
+
         LpCard {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Info, contentDescription = null, tint = LpCyan)
@@ -572,10 +620,13 @@ private fun ProcessingScreen(
         ttsError?.let { error ->
             LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
+        mixError?.let { error ->
+            LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
     }
 }
 
-private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase, ttsPhase: TTSPhase): String = when (mediaState) {
+private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase, ttsPhase: TTSPhase, mixPhase: MixPhase): String = when (mediaState) {
     MediaPreparationState.EXTRACTING_AUDIO -> "Preparing local audio"
     MediaPreparationState.AUDIO_READY -> when (asrPhase) {
         ASRPhase.MODEL_MISSING -> "Audio ready · speech model not installed"
@@ -585,7 +636,13 @@ private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhas
             TranslationPhase.TRANSLATING -> "Translating transcript"
             TranslationPhase.COMPLETED -> when (ttsPhase) {
                 TTSPhase.SYNTHESIZING -> "Creating Vietnamese voice on-device"
-                TTSPhase.COMPLETED -> "Vietnamese voice ready"
+                TTSPhase.COMPLETED -> when (mixPhase) {
+                    MixPhase.RENDERING_AUDIO -> "Building local dub timeline"
+                    MixPhase.REMUXING -> "Remuxing dubbed video"
+                    MixPhase.COMPLETED -> "Dubbed video ready"
+                    MixPhase.FAILED -> "Local mix or remux stopped"
+                    MixPhase.IDLE -> "Vietnamese voice ready"
+                }
                 TTSPhase.VOICE_MISSING -> "Translation ready · offline voice not installed"
                 TTSPhase.FAILED -> "Vietnamese voice synthesis stopped"
                 TTSPhase.IDLE -> "Vietnamese translation ready"
@@ -632,63 +689,196 @@ private fun ttsProcessState(state: TTSPhase): ProcessState = when (state) {
     TTSPhase.IDLE -> ProcessState.PENDING
 }
 
+private fun mixProcessState(state: MixPhase): ProcessState = when (state) {
+    MixPhase.RENDERING_AUDIO, MixPhase.REMUXING -> ProcessState.ACTIVE
+    MixPhase.COMPLETED -> ProcessState.COMPLETE
+    MixPhase.FAILED -> ProcessState.FAILED
+    MixPhase.IDLE -> ProcessState.PENDING
+}
+
 @Composable
-private fun PlayerScreen(audioBlend: Float, onAudioBlendChange: (Float) -> Unit, onBack: () -> Unit) {
+private fun PlayerScreen(
+    media: LocalMediaItem?,
+    processed: LocalDubMediaResult?,
+    translation: TranslationDocument?,
+    audioBlend: Float,
+    onAudioBlendChange: (Float) -> Unit,
+    onBack: () -> Unit,
+) {
     ScreenScroll {
-        ScreenHeader("The Future of AI", onBack) {
+        ScreenHeader(media?.name ?: "Preview", onBack) {
             Surface(color = LpViolet.copy(alpha = 0.30f), shape = RoundedCornerShape(50)) {
-                Text("Vietnamese AI", modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (processed != null) "Vietnamese AI" else "Demo UI",
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
 
-        Box(modifier = Modifier.fillMaxWidth()) {
+        if (processed != null) {
+            SingleClockDubPlayer(
+                processed = processed,
+                translation = translation,
+            )
+        } else {
             VideoPlaceholder(250.dp)
-            Row(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.48f)).padding(horizontal = 22.dp, vertical = 11.dp),
-                horizontalArrangement = Arrangement.spacedBy(30.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.Replay10, contentDescription = "Back 10 seconds")
-                Icon(Icons.Rounded.Pause, contentDescription = "Pause", modifier = Modifier.size(28.dp))
-                Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10 seconds")
+            LpCard {
+                Text("Demo navigation only", fontWeight = FontWeight.Bold)
+                Text(
+                    "Import and process a local video to use real single-clock dubbed playback.",
+                    color = LpSecondaryText,
+                    fontSize = 12.sp,
+                )
             }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Slider(value = 0.19f, onValueChange = {})
-            Row {
-                Text("00:15:42", color = LpSecondaryText, fontSize = 10.sp)
-                Spacer(Modifier.weight(1f))
-                Text("01:24:32", color = LpSecondaryText, fontSize = 10.sp)
-            }
-        }
-
-        LpCard {
-            SubtitleRow("EN", "Artificial intelligence is transforming the way we live and work.")
-            CardDivider()
-            SubtitleRow("VI", "Trí tuệ nhân tạo đang thay đổi cách chúng ta sống và làm việc.")
         }
 
         LpCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Audio blend", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text("${(audioBlend * 100).toInt()}% Dub", color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Balanced export", color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            Slider(value = audioBlend, onValueChange = onAudioBlendChange, valueRange = 0f..1f)
+            Slider(
+                value = audioBlend,
+                onValueChange = onAudioBlendChange,
+                valueRange = 0f..1f,
+                enabled = false,
+            )
             Row {
                 Text("Original", color = LpSecondaryText, fontSize = 12.sp)
                 Spacer(Modifier.weight(1f))
                 Text("Dub", color = LpSecondaryText, fontSize = 12.sp)
             }
+            Text(
+                "Android playback uses one mixed audio track to avoid dual-player clock drift. Live blend is disabled until it can run inside one audio graph.",
+                color = LpSecondaryText,
+                fontSize = 10.sp,
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlayerAction(Icons.Rounded.ClosedCaption, "Subtitles", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.Tune, "Blend", Modifier.weight(1f))
+            PlayerAction(Icons.Rounded.Tune, "Mixed", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Speed, "1.0x", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Download, "Offline", Modifier.weight(1f))
         }
+    }
+}
+
+@Composable
+private fun SingleClockDubPlayer(
+    processed: LocalDubMediaResult,
+    translation: TranslationDocument?,
+) {
+    var videoView by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf<VideoView?>(null) }
+    var videoReady by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentMs by remember { mutableStateOf(0) }
+
+    LaunchedEffect(isPlaying, videoView) {
+        while (isPlaying) {
+            currentMs = videoView?.currentPosition?.coerceAtLeast(0) ?: currentMs
+            delay(250)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black),
+    ) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoPath(processed.remuxedVideoFile.absolutePath)
+                    setOnPreparedListener {
+                        videoReady = true
+                    }
+                    setOnCompletionListener {
+                        isPlaying = false
+                        currentMs = processed.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    }
+                }
+            },
+            update = { view -> videoView = view },
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 14.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.58f))
+                .padding(horizontal = 18.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.Replay10,
+                contentDescription = "Back 10 seconds",
+                modifier = Modifier.clickable {
+                    val target = (currentMs - 10_000).coerceAtLeast(0)
+                    videoView?.seekTo(target)
+                    currentMs = target
+                },
+            )
+            Icon(
+                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                modifier = Modifier
+                    .size(30.dp)
+                    .clickable(enabled = videoReady) {
+                        val view = videoView ?: return@clickable
+                        if (isPlaying) {
+                            view.pause()
+                            isPlaying = false
+                        } else {
+                            view.start()
+                            isPlaying = true
+                        }
+                    },
+            )
+            Icon(
+                Icons.Rounded.Forward10,
+                contentDescription = "Forward 10 seconds",
+                modifier = Modifier.clickable {
+                    val duration = processed.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    val target = (currentMs + 10_000).coerceAtMost(duration)
+                    videoView?.seekTo(target)
+                    currentMs = target
+                },
+            )
+        }
+    }
+
+    val durationMs = processed.durationMs.coerceAtLeast(1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Slider(
+            value = currentMs.coerceIn(0, durationMs).toFloat(),
+            onValueChange = { value ->
+                val target = value.toInt().coerceIn(0, durationMs)
+                currentMs = target
+                videoView?.seekTo(target)
+            },
+            valueRange = 0f..durationMs.toFloat(),
+        )
+        Row {
+            Text(MediaFormatting.duration(currentMs.toLong()), color = LpSecondaryText, fontSize = 10.sp)
+            Spacer(Modifier.weight(1f))
+            Text(MediaFormatting.duration(durationMs.toLong()), color = LpSecondaryText, fontSize = 10.sp)
+        }
+    }
+
+    val activeSegment = translation?.segments?.lastOrNull { currentMs >= it.startMs && currentMs < it.endMs }
+    LpCard {
+        SubtitleRow("SRC", activeSegment?.sourceText ?: "—")
+        CardDivider()
+        SubtitleRow("VI", activeSegment?.translatedText ?: "—")
     }
 }
 

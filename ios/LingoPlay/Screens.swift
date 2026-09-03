@@ -1,4 +1,6 @@
+import AVFoundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct SplashView: View {
@@ -290,7 +292,7 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Creating Vietnamese voice", state: ttsStageState)
                     Divider().overlay(LPTheme.border)
-                    ProcessingStageRow(title: "Mixing audio", state: .pending)
+                    ProcessingStageRow(title: "Mixing audio", state: mixingStageState)
                 }
                 .lpCard()
 
@@ -382,6 +384,26 @@ struct ProcessingView: View {
                         .lpCard()
                 }
 
+                if case .completed = model.mixState {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Dubbed video ready", systemImage: "checkmark.circle.fill")
+                                .font(.headline)
+                                .foregroundStyle(LPTheme.accent)
+                            Spacer()
+                            Text("LOCAL")
+                                .font(.caption2.bold())
+                                .foregroundStyle(LPTheme.cyan)
+                        }
+                        Text("Video was remuxed without video transcoding.")
+                            .font(.caption)
+                        Text("Original audio and Vietnamese dub remain separate for live blend control.")
+                            .font(.caption2)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .lpCard()
+                }
+
                 if case .failed(let message) = model.mediaState {
                     Text(message)
                         .font(.caption)
@@ -409,6 +431,13 @@ struct ProcessingView: View {
                         .foregroundStyle(.red)
                         .lpCard()
                 }
+
+                if case .failed(let message) = model.mixState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lpCard()
+                }
             }
             .padding(18)
             .padding(.bottom, 28)
@@ -431,7 +460,14 @@ struct ProcessingView: View {
                 case .completed:
                     switch model.ttsState {
                     case .synthesizing: return "Creating Vietnamese voice on-device"
-                    case .completed: return "Vietnamese voice ready"
+                    case .completed:
+                        switch model.mixState {
+                        case .renderingAudio: return "Building local dub timeline"
+                        case .remuxing: return "Remuxing dubbed video"
+                        case .completed: return "Dubbed video ready"
+                        case .failed: return "Local mix or remux stopped"
+                        case .idle: return "Vietnamese voice ready"
+                        }
                     case .voiceMissing: return "Translation ready · Vietnamese voice not installed"
                     case .failed: return "Vietnamese voice synthesis stopped"
                     case .idle: return "Vietnamese translation ready"
@@ -483,6 +519,15 @@ struct ProcessingView: View {
         switch model.ttsState {
         case .voiceMissing: .voiceMissing
         case .synthesizing: .active
+        case .completed: .complete
+        case .failed: .failed
+        case .idle: .pending
+        }
+    }
+
+    private var mixingStageState: ProcessingStageRow.State {
+        switch model.mixState {
+        case .renderingAudio, .remuxing: .active
         case .completed: .complete
         case .failed: .failed
         case .idle: .pending
@@ -553,47 +598,71 @@ struct PlayerView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                ScreenHeader(title: "The Future of AI", backAction: model.returnHome) {
-                    Text("Vietnamese AI")
+                ScreenHeader(title: model.selectedMedia?.title ?? "Preview", backAction: model.returnHome) {
+                    Text(model.processedMedia == nil ? "Demo UI" : "Vietnamese AI")
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(LPTheme.violet.opacity(0.35), in: Capsule())
                 }
 
-                ZStack(alignment: .bottom) {
+                if let player = model.videoPlayer, model.processedMedia != nil {
+                    ZStack(alignment: .bottom) {
+                        LocalVideoSurface(player: player)
+                            .frame(height: 250)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .background(.black, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        HStack(spacing: 34) {
+                            Button { model.skipPlayback(seconds: -10) } label: {
+                                Image(systemName: "gobackward.10")
+                            }
+                            Button { model.togglePlayback() } label: {
+                                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.title2)
+                            }
+                            Button { model.skipPlayback(seconds: 10) } label: {
+                                Image(systemName: "goforward.10")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.body.bold())
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 13)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.bottom, 14)
+                    }
+                } else {
                     VideoPlaceholder(width: nil, height: 250)
-                    HStack(spacing: 34) {
-                        Image(systemName: "gobackward.10")
-                        Image(systemName: "pause.fill")
-                            .font(.title2)
-                        Image(systemName: "goforward.10")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Demo navigation only")
+                            .font(.headline)
+                        Text("Import and process a local video to use real dubbed playback and the live Original ↔ Dub blend.")
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
                     }
-                    .font(.body.bold())
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 13)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 14)
+                    .lpCard()
                 }
 
-                VStack(spacing: 8) {
-                    Slider(value: .constant(0.19))
-                        .tint(LPTheme.cyan)
-                    HStack {
-                        Text("00:15:42")
-                        Spacer()
-                        Text("01:24:32")
+                if model.processedMedia != nil {
+                    VStack(spacing: 8) {
+                        Slider(value: playbackFraction)
+                            .tint(LPTheme.cyan)
+                        HStack {
+                            Text(formatPlaybackTime(model.playbackPosition))
+                            Spacer()
+                            Text(formatPlaybackTime(model.playbackDuration))
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(LPTheme.secondaryText)
                     }
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(LPTheme.secondaryText)
-                }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    SubtitleLine(language: "EN", text: "Artificial intelligence is transforming the way we live and work.")
-                    Divider().overlay(LPTheme.border)
-                    SubtitleLine(language: "VI", text: "Trí tuệ nhân tạo đang thay đổi cách chúng ta sống và làm việc.")
+                    VStack(alignment: .leading, spacing: 12) {
+                        SubtitleLine(language: "SRC", text: model.activeTranslationSegment?.sourceText ?? "—")
+                        Divider().overlay(LPTheme.border)
+                        SubtitleLine(language: "VI", text: model.activeTranslationSegment?.translatedText ?? "—")
+                    }
+                    .lpCard()
                 }
-                .lpCard()
 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -606,6 +675,7 @@ struct PlayerView: View {
                     }
                     Slider(value: $model.audioBlend, in: 0...1)
                         .tint(LPTheme.cyan)
+                        .disabled(model.processedMedia == nil)
                     HStack {
                         Text("Original")
                         Spacer()
@@ -627,7 +697,49 @@ struct PlayerView: View {
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
+        .onDisappear { model.pausePlayback() }
     }
+
+    private var playbackFraction: Binding<Double> {
+        Binding(
+            get: {
+                guard model.playbackDuration > 0 else { return 0 }
+                return min(max(model.playbackPosition / model.playbackDuration, 0), 1)
+            },
+            set: { model.seek(to: $0) }
+        )
+    }
+
+    private func formatPlaybackTime(_ seconds: Double) -> String {
+        let total = Int(max(0, seconds).rounded())
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let remainder = total % 60
+        return hours > 0
+            ? String(format: "%02d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%02d:%02d", minutes, remainder)
+    }
+}
+
+private struct LocalVideoSurface: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerSurfaceView {
+        let view = PlayerSurfaceView()
+        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.player = player
+        view.backgroundColor = .black
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerSurfaceView, context: Context) {
+        uiView.playerLayer.player = player
+    }
+}
+
+private final class PlayerSurfaceView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 private struct SubtitleLine: View {

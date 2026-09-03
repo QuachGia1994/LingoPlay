@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 
@@ -49,7 +50,9 @@ final class AppModel {
     var stage: Stage = .splash
     var selectedTab: Tab = .home
     var processingProgress = 0.0
-    var audioBlend = 0.60
+    var audioBlend = 0.60 {
+        didSet { updatePlayerMix() }
+    }
     var playbackSpeed = 1.0
     var wifiOnly = true
     var bilingualSubtitles = true
@@ -59,12 +62,21 @@ final class AppModel {
     var asrState: ASRState = .idle
     var translationState: TranslationState = .idle
     var ttsState: TTSState = .idle
+    var mixState: MixState = .idle
+    var processedMedia: LocalDubMediaResult?
+    var videoPlayer: AVPlayer?
+    var playbackPosition = 0.0
+    var playbackDuration = 0.0
+    var isPlaying = false
 
     private let mediaService = LocalMediaService()
     private let asrModelStore = ASRModelStore()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     private let translationService = TranslationService()
     private let ttsService = SystemVietnameseTTSService()
+    private let timelineMixService = TimelineMixService()
+    private var playbackMixContext: PlaybackMixContext?
+    private var playbackTimeObserver: Any?
 
     let recentVideos = [
         RecentVideo(title: "The Future of AI", duration: "01:24:32", languagePair: "EN → VI"),
@@ -86,6 +98,9 @@ final class AppModel {
         asrState = .idle
         translationState = .idle
         ttsState = .idle
+        mixState = .idle
+        processedMedia = nil
+        teardownPlayback()
         processingProgress = 0
         do {
             selectedMedia = try await mediaService.importMedia(from: url)
@@ -105,6 +120,9 @@ final class AppModel {
         asrState = .idle
         translationState = .idle
         ttsState = .idle
+        mixState = .idle
+        processedMedia = nil
+        teardownPlayback()
         stage = .processing
         Task { await prepareAudio() }
     }
@@ -172,10 +190,37 @@ final class AppModel {
             }
             ttsState = .completed(dub)
             processingProgress = 0.8
+            await renderDubbedMedia(dub)
         } catch TTSError.offlineVietnameseVoiceMissing {
             ttsState = .voiceMissing
         } catch {
             ttsState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func renderDubbedMedia(_ dub: DubSpeechDocument) async {
+        guard let selectedMedia else { return }
+        do {
+            let result = try await timelineMixService.render(media: selectedMedia, dub: dub) { [weak self] state in
+                self?.mixState = state
+                switch state {
+                case .renderingAudio:
+                    self?.processingProgress = 0.85
+                case .remuxing:
+                    self?.processingProgress = 0.92
+                case .completed:
+                    self?.processingProgress = 1.0
+                case .idle, .failed:
+                    break
+                }
+            }
+            processedMedia = result
+            mixState = .completed(result)
+            processingProgress = 1.0
+            try await configurePlayback(with: result, dub: dub)
+            stage = .player
+        } catch {
+            mixState = .failed(error.localizedDescription)
         }
     }
 
@@ -186,16 +231,103 @@ final class AppModel {
     }
 
     func previewResult() {
-        processingProgress = 1
+        pausePlayback()
+        processedMedia = nil
+        teardownPlayback()
         stage = .player
     }
 
+    func togglePlayback() {
+        guard let videoPlayer else { return }
+        if isPlaying {
+            pausePlayback()
+            return
+        }
+        videoPlayer.play()
+        isPlaying = true
+    }
+
+    func pausePlayback() {
+        videoPlayer?.pause()
+        isPlaying = false
+    }
+
+    func seek(to fraction: Double) {
+        guard playbackDuration > 0 else { return }
+        let seconds = min(max(fraction, 0), 1) * playbackDuration
+        seekPlayback(to: seconds)
+    }
+
+    func skipPlayback(seconds: Double) {
+        seekPlayback(to: min(max(playbackPosition + seconds, 0), playbackDuration))
+    }
+
+    var activeTranslationSegment: TranslationSegment? {
+        guard case .completed(let document) = translationState else { return nil }
+        let positionMs = Int((playbackPosition * 1_000).rounded())
+        return document.segments.last { positionMs >= $0.startMs && positionMs < $0.endMs }
+    }
+
+    private func configurePlayback(with result: LocalDubMediaResult, dub: DubSpeechDocument) async throws {
+        guard let selectedMedia else { return }
+        teardownPlayback()
+
+        let session = try await timelineMixService.makePlaybackSession(
+            media: selectedMedia,
+            dubbedAudioURL: result.dubbedAudioURL,
+            speechSegments: dub.segments,
+            blend: audioBlend
+        )
+        let player = AVPlayer(playerItem: session.item)
+        videoPlayer = player
+        playbackMixContext = session.mixContext
+        playbackDuration = max(0, result.duration)
+        playbackPosition = 0
+        isPlaying = false
+
+        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
+        playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            Task { @MainActor in
+                guard let self else { return }
+                let seconds = max(0, time.seconds.isFinite ? time.seconds : 0)
+                self.playbackPosition = min(seconds, self.playbackDuration)
+            }
+        }
+    }
+
+    private func seekPlayback(to seconds: Double) {
+        guard playbackDuration > 0 else { return }
+        let clamped = min(max(seconds, 0), playbackDuration)
+        let time = CMTime(seconds: clamped, preferredTimescale: 600)
+        videoPlayer?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        playbackPosition = clamped
+    }
+
+    private func updatePlayerMix() {
+        guard let context = playbackMixContext, let item = videoPlayer?.currentItem else { return }
+        item.audioMix = timelineMixService.makePlaybackAudioMix(context: context, blend: audioBlend)
+    }
+
+    private func teardownPlayback() {
+        pausePlayback()
+        if let playbackTimeObserver, let videoPlayer {
+            videoPlayer.removeTimeObserver(playbackTimeObserver)
+        }
+        playbackTimeObserver = nil
+        playbackMixContext = nil
+        videoPlayer = nil
+        playbackPosition = 0
+        playbackDuration = 0
+    }
+
     func returnHome() {
+        pausePlayback()
         selectedTab = .home
         stage = .home
     }
 
     func selectTab(_ tab: Tab) {
+        pausePlayback()
         selectedTab = tab
         stage = .home
     }

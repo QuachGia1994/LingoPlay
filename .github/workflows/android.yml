@@ -52,6 +52,9 @@ jobs:
       - name: Lint
         run: ./gradlew lintDebug --stacktrace
 
+      - name: Build installable debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
       - name: Build optimized release
         run: ./gradlew assembleRelease bundleRelease --stacktrace
 
@@ -84,6 +87,7 @@ jobs:
           compression-level: 0
           retention-days: 7
           path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/release/LingoPlay-release-test.apk
             android/app/build/outputs/apk/release/app-release-unsigned.apk
             android/app/build/outputs/bundle/release/*.aab
