@@ -14,21 +14,21 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept licenses and install Build-Tools
+      - name: Accept licenses and install Windows SDK tools
         shell: pwsh
         run: |
           cmd /c "echo y| sdkmanager.bat --licenses" | Out-Null
-          sdkmanager.bat "build-tools;36.0.0"
+          sdkmanager.bat "build-tools;36.0.0" "platform-tools"
 
-      - name: Package Windows Build-Tools
+      - name: Package Windows SDK tools
         shell: pwsh
         run: |
-          tar -C "$env:ANDROID_SDK_ROOT" -czf windows-build-tools-36.tar.gz build-tools/36.0.0 licenses
+          tar -C "$env:ANDROID_SDK_ROOT" -czf windows-sdk-tools.tar.gz build-tools/36.0.0 platform-tools licenses
 
-      - name: Upload Windows Build-Tools
+      - name: Upload Windows SDK tools
         uses: actions/upload-artifact@v4
         with:
-          name: android-windows-buildtools-36
+          name: android-windows-sdk-tools
           if-no-files-found: error
-          path: windows-build-tools-36.tar.gz
+          path: windows-sdk-tools.tar.gz
           retention-days: 1
