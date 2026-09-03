@@ -48,6 +48,16 @@ jobs:
                           def aapt2Dep = project.dependencies.create('com.android.tools.build:aapt2:9.3.2-15703166:windows@jar')
                           def aapt2Config = project.configurations.detachedConfiguration(aapt2Dep)
                           println("Resolved AAPT2 Windows -> ${aapt2Config.files.size()} files")
+                          ['kotlin-build-tools-compat', 'kotlin-build-tools-impl'].each { module ->
+                              def kotlinDep = project.dependencies.create("org.jetbrains.kotlin:${module}:2.3.21")
+                              def kotlinConfig = project.configurations.detachedConfiguration(kotlinDep)
+                              println("Resolved ${module} -> ${kotlinConfig.files.size()} files")
+                          }
+                          project.configurations.findAll { cfg ->
+                              cfg.canBeResolved && (cfg.name.toLowerCase().contains('kotlin') || cfg.name.toLowerCase().contains('lint'))
+                          }.each { cfg ->
+                              println("Resolved ${project.path}:${cfg.name} -> ${cfg.files.size()} files")
+                          }
                       }
                   }
               }
