@@ -74,7 +74,11 @@ dependencies {
     if (localSherpaAar.exists()) {
         implementation(files(localSherpaAar))
     } else {
-        implementation("com.github.k2-fsa:sherpa-onnx:v1.13.7")
+        implementation("com.github.k2-fsa:sherpa-onnx:v1.13.7") {
+            // The Android AAR already contains the Kotlin/JVM API classes.
+            // JitPack also declares sherpa-onnx-jvm transitively, which duplicates them on CI.
+            exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+        }
     }
 
     testImplementation("junit:junit:4.13.2")
