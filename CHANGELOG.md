@@ -19,6 +19,7 @@ All notable changes to LingoPlay are documented here.
 - Production-safe Stage 6 local media pipeline: timestamp-driven ducking, original-soundtrack preservation, Vietnamese TTS mixing, final self-contained MP4 remux, single-clock playback, bounded rendered-cache retention, and active bilingual subtitles.
 - Android Stage 6 streaming audio mixer that decodes the original soundtrack in bounded PCM chunks, normalizes/resamples only as required by AAC encoder capabilities, mixes TTS in memory, streams directly to MediaCodec AAC, and PTS-interleaves final MP4 samples without a full-duration WAV intermediate.
 - iOS Stage 6 AVAudioMix pipeline with explicit volume ramps for ducking, passthrough video remux, one AVPlayerItem containing original + dub audio for same-clock Original↔Dub control, and no dual-player hard-seek synchronization.
+- Android physical-device Stage 6 instrumentation fixtures covering a short mix/remux and a sustained 120-second hardware-codec run; both pass on a MEIZU Lucky 08 (Android 14, arm64-v8a) with final video+audio track and duration assertions.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed

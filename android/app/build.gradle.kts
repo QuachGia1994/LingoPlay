@@ -13,6 +13,7 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val translationApiBaseUrl = providers.gradleProperty("LINGOPLAY_TRANSLATION_API_BASE_URL").orNull.orEmpty()
         buildConfigField("String", "TRANSLATION_API_BASE_URL", "\"${translationApiBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
 
@@ -82,5 +83,7 @@ dependencies {
     }
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
