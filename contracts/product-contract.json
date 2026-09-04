@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "languages": {
+    "source": ["auto", "en", "vi", "ja", "zh"],
+    "target": ["vi", "en", "ja", "zh"]
+  },
+  "playbackSpeeds": [0.75, 1.0, 1.25, 1.5],
+  "dubbingModes": {
+    "balanced": {
+      "duckFloor": 0.16,
+      "dubGain": 0.92,
+      "duckFadeMs": 120
+    },
+    "speechFocus": {
+      "duckFloor": 0.08,
+      "dubGain": 1.0,
+      "duckFadeMs": 120
+    },
+    "originalFocus": {
+      "duckFloor": 0.34,
+      "dubGain": 0.82,
+      "duckFadeMs": 100
+    }
+  },
+  "plus": {
+    "weeklyProductId": "com.lingoplay.plus.weekly",
+    "monthlyProductId": "com.lingoplay.plus.monthly"
+  },
+  "capabilities": {
+    "cleanBackgroundVerified": false
+  }
+}

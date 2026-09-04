@@ -50,8 +50,17 @@ jobs:
         working-directory: .
         run: python3 scripts/verify_release_privacy.py
 
+      - name: Verify product contract and architecture
+        working-directory: .
+        run: |
+          python3 scripts/verify_product_contract.py
+          python3 scripts/verify_architecture.py
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Compile instrumentation tests
+        run: ./gradlew compileDebugAndroidTestKotlin --stacktrace
 
       - name: Lint
         run: ./gradlew lintDebug --stacktrace

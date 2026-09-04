@@ -497,26 +497,6 @@ final class AppModel {
         seekPlayback(to: min(max(playbackPosition + seconds, 0), playbackDuration))
     }
 
-    var activeTranslationSegment: TranslationSegment? {
-        guard case .completed(let document) = translationState else { return nil }
-        let positionMs = Int((playbackPosition * 1_000).rounded())
-        return document.segments.last { positionMs >= $0.startMs && positionMs <= $0.endMs }
-    }
-
-    var activeSubtitleSourceLanguage: String {
-        if case .completed(let document) = translationState {
-            return document.sourceLanguage.uppercased()
-        }
-        return sourceLanguageChoice.code?.uppercased() ?? "SRC"
-    }
-
-    var activeSubtitleTargetLanguage: String {
-        if case .completed(let document) = translationState {
-            return document.targetLanguage.uppercased()
-        }
-        return targetLanguageChoice.code.uppercased()
-    }
-
     private func configurePlayback(with result: LocalDubMediaResult, dub: DubSpeechDocument, mode: DubbingModePreset) async throws {
         guard let selectedMedia else { return }
         teardownPlayback()
@@ -616,74 +596,8 @@ final class AppModel {
         )
     }
 
-    var availableOfflineVoices: [OfflineVoiceOption] {
-        DubbingPreferencePolicy.availableOfflineVoices()
-    }
-
-    var availableTargetVoices: [OfflineVoiceOption] {
-        availableOfflineVoices.filter { $0.languageCode == targetLanguageChoice.code }
-    }
-
-    var preferredVoiceLabel: String {
-        availableTargetVoices.first(where: { $0.id == preferredVoiceIdentifier })?.label ?? "Automatic"
-    }
-
-    func cycleSourceLanguage() {
-        let values = SourceLanguageChoice.allCases
-        let index = values.firstIndex(of: sourceLanguageChoice) ?? 0
-        sourceLanguageChoice = values[(index + 1) % values.count]
-    }
-
-    func cycleTargetLanguage() {
-        let availableCodes = Set(availableOfflineVoices.map(\.languageCode))
-        let values = TargetLanguageChoice.allCases.filter { availableCodes.contains($0.code) }
-        let candidates = values.isEmpty ? [.vi] : values
-        let index = candidates.firstIndex(of: targetLanguageChoice) ?? -1
-        targetLanguageChoice = candidates[(index + 1) % candidates.count]
-    }
-
-    func cycleVoice() {
-        let candidates: [String?] = [nil] + availableTargetVoices.map(\.id)
-        let index = candidates.firstIndex(where: { $0 == preferredVoiceIdentifier }) ?? 0
-        preferredVoiceIdentifier = candidates[(index + 1) % candidates.count]
-    }
-
-    func cycleDubbingMode() {
-        let values = DubbingModePreset.allCases
-        let index = values.firstIndex(of: dubbingMode) ?? 0
-        dubbingMode = values[(index + 1) % values.count]
-    }
-
-    func cycleSubtitleMode() {
-        let values = SubtitleMode.allCases
-        let index = values.firstIndex(of: subtitleMode) ?? 0
-        subtitleMode = values[(index + 1) % values.count]
-    }
-
-    func cyclePlaybackSpeed() {
-        playbackSpeed = DubbingPreferencePolicy.nextPlaybackSpeed(after: playbackSpeed)
-    }
-
     func localDiagnosticsCount() async -> Int {
         await diagnostics.recent().count
-    }
-
-    var uiLanguageLabel: String {
-        uiLanguageCode == "vi" ? "Tiếng Việt" : "English"
-    }
-
-    func uiText(_ english: String, _ vietnamese: String) -> String {
-        uiLanguageCode == "vi" ? vietnamese : english
-    }
-
-    func toggleAppearance() {
-        highContrast.toggle()
-        UserDefaults.standard.set(highContrast, forKey: "lingoplay.highContrast")
-    }
-
-    func toggleLanguage() {
-        uiLanguageCode = uiLanguageCode == "vi" ? "en" : "vi"
-        UserDefaults.standard.set(uiLanguageCode, forKey: "lingoplay.uiLanguage")
     }
 
     func returnHome() {

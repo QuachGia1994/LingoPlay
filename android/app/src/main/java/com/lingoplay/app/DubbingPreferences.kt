@@ -101,30 +101,39 @@ object DubbingPreferencePolicy {
     }
 }
 
-class DubbingPreferencesStore(context: Context) {
+interface DubbingPreferencePersistence {
+    var sourceLanguage: SourceLanguageChoice
+    var targetLanguage: TargetLanguageChoice
+    var dubbingMode: DubbingModePreset
+    var subtitleMode: SubtitleMode
+    var playbackSpeed: Float
+    var preferredVoiceId: String?
+}
+
+class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
     private val prefs = context.getSharedPreferences("lingoplay_dubbing", Context.MODE_PRIVATE)
 
-    var sourceLanguage: SourceLanguageChoice
+    override var sourceLanguage: SourceLanguageChoice
         get() = enumValue("source_language", SourceLanguageChoice.AUTO)
         set(value) = prefs.edit().putString("source_language", value.name).apply()
 
-    var targetLanguage: TargetLanguageChoice
+    override var targetLanguage: TargetLanguageChoice
         get() = enumValue("target_language", TargetLanguageChoice.VIETNAMESE)
         set(value) = prefs.edit().putString("target_language", value.name).apply()
 
-    var dubbingMode: DubbingModePreset
+    override var dubbingMode: DubbingModePreset
         get() = enumValue("dubbing_mode", DubbingModePreset.BALANCED)
         set(value) = prefs.edit().putString("dubbing_mode", value.name).apply()
 
-    var subtitleMode: SubtitleMode
+    override var subtitleMode: SubtitleMode
         get() = enumValue("subtitle_mode", SubtitleMode.BILINGUAL)
         set(value) = prefs.edit().putString("subtitle_mode", value.name).apply()
 
-    var playbackSpeed: Float
+    override var playbackSpeed: Float
         get() = prefs.getFloat("playback_speed", 1.0f).takeIf { it in 0.5f..2.0f } ?: 1.0f
         set(value) = prefs.edit().putFloat("playback_speed", value.coerceIn(0.5f, 2.0f)).apply()
 
-    var preferredVoiceId: String?
+    override var preferredVoiceId: String?
         get() = prefs.getString("preferred_voice_id", null)?.takeIf(String::isNotBlank)
         set(value) = prefs.edit().putString("preferred_voice_id", value.orEmpty()).apply()
 

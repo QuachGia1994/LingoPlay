@@ -23,6 +23,8 @@ targets:
         product: WhisperKit
     scheme:
       storeKitConfiguration: Products.storekit
+      testTargets:
+        - LingoPlayTests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lingoplay.app
@@ -38,3 +40,16 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+  LingoPlayTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: LingoPlayTests
+    dependencies:
+      - target: LingoPlay
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lingoplay.app.tests
+        SWIFT_VERSION: 6.0
+        GENERATE_INFOPLIST_FILE: YES
