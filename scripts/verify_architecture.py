@@ -77,10 +77,13 @@ require(playback_extension.is_file(), "iOS playback presentation extension exist
 require((ROOT / "ios/LingoPlay/PlaybackPresentationPolicy.swift").is_file(), "iOS playback presentation policy exists")
 require((ROOT / "android/app/src/main/java/com/lingoplay/app/PlayerInteractionPolicy.kt").is_file(), "Android player interaction policy exists")
 require((ROOT / "ios/LingoPlayTests/PolicyTests.swift").is_file(), "iOS policy unit tests exist")
+for verifier in ("verify_ios_source_hardening.py", "verify_ios_build_settings.py", "verify_ios_binary.py"):
+    require((ROOT / "scripts" / verifier).is_file(), f"iOS release verifier exists: {verifier}")
 
 project_spec = (ROOT / "ios/project.yml").read_text(encoding="utf-8")
 require("LingoPlayTests:" in project_spec, "XcodeGen unit-test target declared")
 require("testTargets:" in project_spec and "- LingoPlayTests" in project_spec, "LingoPlay scheme includes unit tests")
+require("DEAD_CODE_STRIPPING: YES" in project_spec, "iOS Release explicitly enables dead-code stripping")
 
 android_workflow = (ROOT / ".github/workflows/android.yml").read_text(encoding="utf-8")
 ios_workflow = (ROOT / ".github/workflows/ios.yml").read_text(encoding="utf-8")
@@ -88,6 +91,11 @@ for name, workflow in (("Android", android_workflow), ("iOS", ios_workflow)):
     require("verify_product_contract.py" in workflow, f"{name} CI runs product contract gate")
     require("verify_architecture.py" in workflow, f"{name} CI runs architecture gate")
 require("Run iOS unit tests" in ios_workflow, "iOS CI executes unit-test target")
+require("verify_ios_source_hardening.py" in ios_workflow, "iOS CI runs source hardening gate")
+require("verify_ios_build_settings.py" in ios_workflow, "iOS CI verifies effective Release build settings")
+require("verify_ios_binary.py" in ios_workflow, "iOS CI audits built Mach-O/dSYM/size budgets")
+require("LingoPlay-iOS-dSYM" in ios_workflow, "iOS CI publishes dSYM artifact")
+require("LingoPlay-iOS-release-reports" in ios_workflow, "iOS CI publishes release reports")
 require("compileDebugAndroidTestKotlin" in android_workflow, "Android CI compiles instrumentation tests")
 
 print("Architecture verification PASSED")

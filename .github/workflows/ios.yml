@@ -28,6 +28,7 @@ jobs:
       - name: Verify release privacy/security config
         run: |
           python3 scripts/verify_release_privacy.py
+          python3 scripts/verify_ios_source_hardening.py
           plutil -lint ios/LingoPlay/PrivacyInfo.xcprivacy
 
       - name: Verify product contract and architecture
@@ -44,6 +45,17 @@ jobs:
 
       - name: Resolve Swift packages
         run: xcodebuild -project ios/LingoPlay.xcodeproj -scheme LingoPlay -resolvePackageDependencies
+
+      - name: Verify effective Release build settings
+        run: |
+          mkdir -p build/reports
+          xcodebuild \
+            -project ios/LingoPlay.xcodeproj \
+            -target LingoPlay \
+            -configuration Release \
+            -sdk iphoneos \
+            -showBuildSettings > build/reports/ios-release-build-settings.txt
+          python3 scripts/verify_ios_build_settings.py build/reports/ios-release-build-settings.txt
 
       - name: Run iOS unit tests
         run: |
@@ -77,9 +89,33 @@ jobs:
           cp -R build/ios/Build/Products/Release-iphoneos/LingoPlay.app build/ipa/Payload/
           ditto -c -k --sequesterRsrc --keepParent build/ipa/Payload build/LingoPlay-unsigned.ipa
 
+      - name: Verify iOS binary, dSYM, and size budgets
+        run: >-
+          python3 scripts/verify_ios_binary.py
+          build/ios/Build/Products/Release-iphoneos/LingoPlay.app
+          --ipa build/LingoPlay-unsigned.ipa
+          --dsym build/ios/Build/Products/Release-iphoneos/LingoPlay.app.dSYM
+          --report build/reports/ios-release-audit.txt
+
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: LingoPlay-iOS-unsigned-IPA
           if-no-files-found: error
           path: build/LingoPlay-unsigned.ipa
+
+      - name: Upload iOS dSYM
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-iOS-dSYM
+          if-no-files-found: error
+          retention-days: 7
+          path: build/ios/Build/Products/Release-iphoneos/LingoPlay.app.dSYM
+
+      - name: Upload iOS release reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-iOS-release-reports
+          if-no-files-found: error
+          retention-days: 7
+          path: build/reports/
