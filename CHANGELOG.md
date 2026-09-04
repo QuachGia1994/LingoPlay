@@ -42,6 +42,7 @@ All notable changes to LingoPlay are documented here.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
+- Android Neural Voice now opens verified app-storage model paths without an AssetManager, preventing sherpa-onnx from aborting when the optional absolute-path voice pack is selected.
 - Processing now continues from real audio preparation into real local ASR and then transcript-only translation when the corresponding model/backend are configured; missing infrastructure stops honestly without fake progress or output.
 - Translation batches are capped below backend limits and preserve stable segment IDs plus source timing for TTS/duration fitting.
 - Processing now advances from 80% to 100% only while real local soundtrack mixing and remux work is executing; Player opens only after a non-empty final media file exists.

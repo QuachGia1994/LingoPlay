@@ -81,7 +81,7 @@ object NeuralVietnameseTTSService {
             provider = "cpu",
         )
         val tts = OfflineTts(
-            assetManager = context.assets,
+            assetManager = null,
             config = OfflineTtsConfig(model = modelConfig, silenceScale = 0.2f),
         )
         val root = File(context.cacheDir, "lingoplay/neural-tts/${UUID.randomUUID()}").apply { mkdirs() }

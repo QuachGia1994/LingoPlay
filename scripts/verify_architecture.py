@@ -235,6 +235,10 @@ for name, source in (("Android", android_neural_runtime), ("iOS", ios_neural_run
     require("TTSRoutingPolicy" in source, f"{name} neural voice routing policy exists")
     require("SYSTEM" in source or ".system" in source, f"{name} keeps system voice fallback")
     require("threadCount" in source, f"{name} bounds neural CPU threads")
+require(
+    "assetManager = null" in android_neural_runtime,
+    "Android neural runtime loads absolute model paths without AssetManager",
+)
 
 require(
     'implementation("org.apache.commons:commons-compress:1.28.0")' in android_build_spec,
