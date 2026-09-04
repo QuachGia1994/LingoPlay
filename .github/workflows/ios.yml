@@ -25,6 +25,11 @@ jobs:
       - name: Xcode version
         run: xcodebuild -version
 
+      - name: Verify release privacy/security config
+        run: |
+          python3 scripts/verify_release_privacy.py
+          plutil -lint ios/LingoPlay/PrivacyInfo.xcprivacy
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

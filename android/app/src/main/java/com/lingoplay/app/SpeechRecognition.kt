@@ -19,6 +19,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 
 data class ASRSegment(
@@ -131,6 +132,7 @@ object SherpaWhisperSpeechRecognizer {
         try {
             AndroidAudioDecoder.forEachChunk(audioFile, budget.chunkSeconds) { chunk ->
                 InferenceMemoryGate.throwIfTrimRequested()
+                if (!ASRAudioGate.hasLikelySpeech(chunk.samples)) return@forEachChunk
                 val stream = recognizer.createStream()
                 try {
                     stream.acceptWaveform(chunk.samples, chunk.sampleRate)
@@ -161,6 +163,26 @@ object SherpaWhisperSpeechRecognizer {
             text = normalized.joinToString(" ") { it.text },
             segments = normalized,
         )
+    }
+}
+
+internal object ASRAudioGate {
+    private const val MIN_RMS = 0.0035f
+    private const val ACTIVE_LEVEL = 0.010f
+    private const val MIN_ACTIVE_FRACTION = 0.015f
+
+    fun hasLikelySpeech(samples: FloatArray): Boolean {
+        if (samples.isEmpty()) return false
+        var energy = 0.0
+        var active = 0
+        samples.forEach { sample ->
+            val value = sample.coerceIn(-1f, 1f)
+            energy += value.toDouble() * value.toDouble()
+            if (kotlin.math.abs(value) >= ACTIVE_LEVEL) active++
+        }
+        val rms = sqrt(energy / samples.size).toFloat()
+        val activeFraction = active.toFloat() / samples.size.toFloat()
+        return rms >= MIN_RMS && activeFraction >= MIN_ACTIVE_FRACTION
     }
 }
 

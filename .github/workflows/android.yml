@@ -46,6 +46,10 @@ jobs:
       - name: Verify wrapper
         run: ./gradlew --version
 
+      - name: Verify release privacy/security config
+        working-directory: .
+        run: python3 scripts/verify_release_privacy.py
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
@@ -79,17 +83,39 @@ jobs:
             app/build/outputs/apk/release/app-release-unsigned.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/LingoPlay-release-test.apk
 
-      - name: Upload Android artifacts
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: LingoPlay-Android
+          name: LingoPlay-Android-debug-apk
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-Android-release-test-apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: android/app/build/outputs/apk/release/LingoPlay-release-test.apk
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-Android-release-aab
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: android/app/build/outputs/bundle/release/*.aab
+
+      - name: Upload Android reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingoPlay-Android-reports
+          if-no-files-found: error
+          retention-days: 7
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/release/LingoPlay-release-test.apk
-            android/app/build/outputs/apk/release/app-release-unsigned.apk
-            android/app/build/outputs/bundle/release/*.aab
             android/app/build/outputs/mapping/release/mapping.txt
             android/app/build/reports/lint-results-debug.html

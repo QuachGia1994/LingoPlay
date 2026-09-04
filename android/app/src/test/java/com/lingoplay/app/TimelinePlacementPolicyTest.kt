@@ -2,6 +2,7 @@ package com.lingoplay.app
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TimelinePlacementPolicyTest {
@@ -17,6 +18,23 @@ class TimelinePlacementPolicyTest {
         assertEquals(Short.MAX_VALUE, TimelinePlacementPolicy.clampPcm16(50_000))
         assertEquals(Short.MIN_VALUE, TimelinePlacementPolicy.clampPcm16(-50_000))
         assertEquals(1_234.toShort(), TimelinePlacementPolicy.clampPcm16(1_234))
+    }
+
+    @Test
+    fun normalizesQuietSpeechWithoutCrossingPeakCeiling() {
+        val quiet = ShortArray(4_800) { index -> if (index % 2 == 0) 1_200 else -1_200 }
+        val normalized = AudioQualityPolicy.normalizeSpeech(quiet)
+        val peak = normalized.maxOf { kotlin.math.abs(it.toInt()) }
+        assertTrue(peak > 1_200)
+        assertTrue(peak <= (Short.MAX_VALUE * 0.93).toInt())
+    }
+
+    @Test
+    fun softLimiterPreservesNormalSamplesAndBoundsOverload() {
+        assertEquals(12_000.toShort(), AudioQualityPolicy.softLimitPcm16(12_000))
+        val overloaded = AudioQualityPolicy.softLimitPcm16(65_000).toInt()
+        assertTrue(overloaded in 29_000..Short.MAX_VALUE.toInt())
+        assertTrue(AudioQualityPolicy.softLimitPcm16(-65_000).toInt() < 0)
     }
 
     @Test

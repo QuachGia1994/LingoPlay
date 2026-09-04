@@ -21,6 +21,8 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlin.math.tanh
 
 
 data class LocalDubMediaResult(
@@ -34,6 +36,45 @@ enum class MixPhase {
     REMUXING,
     COMPLETED,
     FAILED,
+}
+
+internal object AudioQualityPolicy {
+    private const val TARGET_RMS = 0.14
+    private const val PEAK_CEILING = 0.92
+    private const val MAX_GAIN = 2.0
+    private const val SOFT_LIMIT_START = 0.90
+
+    fun normalizeSpeech(samples: ShortArray): ShortArray {
+        if (samples.isEmpty()) return samples
+        var energy = 0.0
+        var peak = 0.0
+        samples.forEach { sample ->
+            val value = sample.toDouble() / Short.MAX_VALUE.toDouble()
+            energy += value * value
+            peak = max(peak, kotlin.math.abs(value))
+        }
+        val rms = sqrt(energy / samples.size.toDouble())
+        if (rms <= 1e-6 || peak <= 1e-6) return samples
+        val rmsGain = (TARGET_RMS / rms).coerceAtMost(MAX_GAIN)
+        val peakGain = PEAK_CEILING / peak
+        val gain = minOf(rmsGain, peakGain, MAX_GAIN)
+        if (gain in 0.995..1.005) return samples
+        return ShortArray(samples.size) { index ->
+            softLimitPcm16((samples[index].toDouble() * gain).roundToInt())
+        }
+    }
+
+    fun softLimitPcm16(value: Int): Short {
+        val normalized = value.toDouble() / Short.MAX_VALUE.toDouble()
+        val magnitude = kotlin.math.abs(normalized)
+        if (magnitude <= SOFT_LIMIT_START) {
+            return value.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
+        val sign = if (normalized < 0) -1.0 else 1.0
+        val excess = (magnitude - SOFT_LIMIT_START) / (1.0 - SOFT_LIMIT_START)
+        val limited = SOFT_LIMIT_START + (1.0 - SOFT_LIMIT_START) * tanh(excess)
+        return (sign * limited.coerceAtMost(0.999) * Short.MAX_VALUE.toDouble()).roundToInt().toShort()
+    }
 }
 
 object TimelinePlacementPolicy {
@@ -324,7 +365,7 @@ object TimelineMixService {
                         }
                     }
                 }
-                pcm[index] = TimelinePlacementPolicy.clampPcm16(mixed)
+                pcm[index] = AudioQualityPolicy.softLimitPcm16(mixed)
             }
         }
         clipCache.evictBefore(startUs - 500_000L)
@@ -584,7 +625,7 @@ object TimelineMixService {
                 val input = readWavSamples(wav)
                 val convertedChannels = convertClipChannels(input, wav.channels, targetChannels)
                 val resampled = resampleClip(convertedChannels, wav.sampleRate, targetRate, targetChannels)
-                ResampledClip(resampled, targetChannels)
+                ResampledClip(AudioQualityPolicy.normalizeSpeech(resampled), targetChannels)
             }
         }
 
@@ -797,7 +838,7 @@ object TimelineMixService {
     private fun readRotation(context: Context, uri: Uri): Int? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, uri)
+            if (uri.scheme == "file") retriever.setDataSource(requireNotNull(uri.path)) else retriever.setDataSource(context, uri)
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull()
         } finally {
             retriever.release()
@@ -805,15 +846,21 @@ object TimelineMixService {
     }
 
     private fun openExtractor(context: Context, uri: Uri): MediaExtractor {
+        val extractor = MediaExtractor()
+        if (uri.scheme == "file") {
+            try {
+                extractor.setDataSource(requireNotNull(uri.path))
+                return extractor
+            } catch (error: Throwable) {
+                extractor.release()
+                throw error
+            }
+        }
         val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r")
             ?: error("The source video cannot be opened for local media processing.")
-        val extractor = MediaExtractor()
         try {
-            if (descriptor.declaredLength >= 0) {
-                extractor.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.declaredLength)
-            } else {
-                extractor.setDataSource(descriptor.fileDescriptor)
-            }
+            if (descriptor.declaredLength >= 0) extractor.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.declaredLength)
+            else extractor.setDataSource(descriptor.fileDescriptor)
         } catch (error: Throwable) {
             extractor.release()
             throw error

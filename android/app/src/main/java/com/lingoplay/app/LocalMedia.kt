@@ -41,17 +41,45 @@ sealed class LocalMediaException(message: String) : Exception(message) {
 }
 
 object LocalMediaRepository {
+    suspend fun importMedia(context: Context, uri: Uri): LocalMediaItem = withContext(Dispatchers.IO) {
+        val metadata = queryMetadata(context, uri)
+        val sourceName = metadata.first ?: "Local video.mp4"
+        val extension = sourceName.substringAfterLast('.', "mp4").take(8).ifBlank { "mp4" }
+        val directory = File(context.cacheDir, "lingoplay/imported-media").apply { mkdirs() }
+        val destination = File(directory, "${UUID.randomUUID()}.$extension")
+        var success = false
+        try {
+            context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
+                destination.outputStream().buffered().use { output -> input.copyTo(output) }
+            } ?: throw LocalMediaException.CannotOpenSource
+            val ownedUri = Uri.fromFile(destination)
+            val durationMs = readDuration(context, ownedUri)
+            val hasAudio = hasAudioTrack(context, ownedUri)
+            success = true
+            LocalMediaItem(
+                uri = ownedUri,
+                name = sourceName,
+                durationMs = durationMs,
+                sizeBytes = destination.length(),
+                hasAudioTrack = hasAudio,
+            )
+        } finally {
+            if (!success) destination.delete()
+        }
+    }
+
     suspend fun inspect(context: Context, uri: Uri): LocalMediaItem = withContext(Dispatchers.IO) {
         val metadata = queryMetadata(context, uri)
         val durationMs = readDuration(context, uri)
         val hasAudio = hasAudioTrack(context, uri)
-        LocalMediaItem(
-            uri = uri,
-            name = metadata.first ?: "Local video",
-            durationMs = durationMs,
-            sizeBytes = metadata.second ?: 0L,
-            hasAudioTrack = hasAudio,
-        )
+        LocalMediaItem(uri, metadata.first ?: "Local video", durationMs, metadata.second ?: 0L, hasAudio)
+    }
+
+    fun deleteOwnedImport(media: LocalMediaItem?) {
+        val uri = media?.uri ?: return
+        if (uri.scheme == "file" && uri.path?.contains("lingoplay${File.separator}imported-media") == true) {
+            runCatching { File(requireNotNull(uri.path)).delete() }
+        }
     }
 
     suspend fun extractAudio(context: Context, media: LocalMediaItem): File = withContext(Dispatchers.IO) {
@@ -63,6 +91,10 @@ object LocalMediaRepository {
     }
 
     private fun queryMetadata(context: Context, uri: Uri): Pair<String?, Long?> {
+        if (uri.scheme == "file") {
+            val file = uri.path?.let(::File) ?: return null to null
+            return file.name to file.length()
+        }
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) return null to null
             val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -77,7 +109,7 @@ object LocalMediaRepository {
     private fun readDuration(context: Context, uri: Uri): Long {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, uri)
+            if (uri.scheme == "file") retriever.setDataSource(requireNotNull(uri.path)) else retriever.setDataSource(context, uri)
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
         } finally {
             retriever.release()
@@ -147,14 +179,20 @@ object LocalMediaRepository {
     }
 
     private fun openExtractor(context: Context, uri: Uri): MediaExtractor {
-        val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: throw LocalMediaException.CannotOpenSource
         val extractor = MediaExtractor()
-        try {
-            if (descriptor.declaredLength >= 0) {
-                extractor.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.declaredLength)
-            } else {
-                extractor.setDataSource(descriptor.fileDescriptor)
+        if (uri.scheme == "file") {
+            try {
+                extractor.setDataSource(requireNotNull(uri.path))
+                return extractor
+            } catch (error: Throwable) {
+                extractor.release()
+                throw error
             }
+        }
+        val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: throw LocalMediaException.CannotOpenSource
+        try {
+            if (descriptor.declaredLength >= 0) extractor.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.declaredLength)
+            else extractor.setDataSource(descriptor.fileDescriptor)
         } catch (error: Throwable) {
             extractor.release()
             throw error

@@ -10,7 +10,9 @@ Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; 
 3. Processing — five understandable AI stages with real state labels rather than technical implementation names.
 4. Player — media-first player, bilingual subtitle card, signature Original ↔ Dub blend control, speed/subtitle actions.
 5. Library & Settings — durable translated media that is inherently offline, plus consumer appearance/language/privacy settings and simple Speech AI install/delete controls without runtime tuning knobs.
-6. Plus sheet (iOS pre-release) — StoreKit 2 product/purchase/restore surface reached from the crown or Settings; unavailable products degrade honestly and do not block the app.
+6. Recovery — Home shows Resume/Discard only when a durable interrupted-processing checkpoint exists; no fake background-progress notification.
+7. Player/PiP — the same single playback clock can continue in native Picture-in-Picture; PiP is not a second synchronized player.
+8. Plus sheet (iOS pre-release) — StoreKit 2 product/purchase/restore surface reached from the crown or Settings; unavailable products degrade honestly and do not block the app.
 
 ## Visual language
 - Dark graphite background with restrained purple→cyan accent.
@@ -36,5 +38,9 @@ Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; 
 - Settings exposes persisted English / Tiếng Việt interface-language controls on both clients for the primary shell/navigation surfaces.
 - Settings exposes truthful Speech AI state/storage plus install/cancel/delete controls. Android shows byte progress for the pinned ~104 MB runtime set; iOS validates WhisperKit download/prewarm before activation.
 - iOS crown and Settings open one Plus sheet backed by StoreKit 2. Local StoreKit products may be absent without affecting free/pre-release capability access; verified StoreKit transactions are the only client-side Plus authority.
+- Prepare labels Clean Background as unavailable until a real cross-platform separator exists; Balanced mode describes normalization + adaptive ducking rather than implying stem separation.
+- Interrupted processing appears as one explicit Home recovery card backed by app-owned media/checkpoint files; Resume starts only when the user asks.
+- Android exposes explicit PiP from Player; iOS uses native AVPlayerViewController controls/PiP on the same AVPlayer.
+- Privacy diagnostics are intentionally invisible telemetry-wise: local bounded event codes only, no user content and no upload.
 - Backend and frontend share the same trust-boundary language: media stays local; only JSON translation requests leave the device.
 - No scraping/downloader affordance is present.

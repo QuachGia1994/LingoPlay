@@ -60,5 +60,21 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - StoreKit 2 applies a verified active Plus entitlement before finishing the transaction, then reconciles against `currentEntitlements`; unverified transactions never grant access.
 - Stage 6 media protections remain authoritative: original soundtrack is preserved/ducked, Android remux is PTS-interleaved, AAC capability fallback/resampling is active, playback is single-clock, and rendered cache is age/size bounded.
 
+## Stage 10 quality boundary
+- Android skips near-silent decoded chunks before Whisper, still uses bounded memory, and chooses low-energy chunk boundaries where available. Synthesized speech clips are RMS-normalized with a peak ceiling before mix; summed PCM uses a soft limiter rather than hard clipping.
+- iOS keeps the original soundtrack and uses a gentler 120 ms duck envelope / higher background floor for less pumping around Vietnamese speech.
+- `Clean Background` is deliberately reported as unavailable. The current artifact does not bundle a verified cross-platform source-separation engine, so the product does not pretend adaptive ducking is stem separation.
+
+## Stage 11 lifecycle boundary
+- Both clients copy selected video into app-owned local storage before processing and persist a small local recovery checkpoint. If the process is interrupted, Home offers Resume/Discard; resume uses prepared audio when it still exists and otherwise restarts from the owned source video.
+- Android Picture-in-Picture uses the same Activity/VideoView playback path. iOS playback uses `AVPlayerViewController` with Picture-in-Picture enabled on the same AVPlayer and a playback audio session.
+- Recovery is the guarantee; unlimited background inference is not. No long-running WorkManager/BGProcessing architecture is presented as guaranteed immediate execution.
+
+## Stage 12 privacy/release boundary
+- iOS ships `PrivacyInfo.xcprivacy` with tracking disabled, no LingoPlay-collected data, and required-reason declarations for app-only UserDefaults, app-container file timestamps, and disk-space checks.
+- Android disables cleartext traffic with a network-security config while backup/data extraction remains disabled.
+- Both clients keep bounded local diagnostics containing only timestamps plus event codes; transcript/media names/error details are not written to the diagnostic log and the log is not uploaded.
+- `scripts/verify_release_privacy.py` validates the privacy manifest, Android network policy, and iOS PiP/privacy project wiring in both platform CI workflows.
+
 ## Current stage
-Stages 1–9 source implementation is wired: local media ingestion, audio preparation, on-device ASR, explicit model acquisition, transcript-only translation, local Vietnamese TTS/duration fitting, production-safe soundtrack mixing/remux, real playback, branded launcher/native launch surfaces, durable local-library persistence, native share/export/deletion, and iOS StoreKit 2 Plus pre-wiring. Home and Library are backed by real saved outputs; saved Library items are offline-capable. Final exported media preserves the original soundtrack/BGM/SFX and ducks it around Vietnamese speech instead of replacing it with a silent-gap dub track. Android Stage 6 has representative MEIZU Lucky 08 physical codec evidence; Stage 8 model-download physical validation on that device remains pending only while the device is disconnected. iOS Stage 8/9 runtime/build evidence comes from the push-triggered Xcode GitHub workflow rather than claims made from the Windows host.
+Stages 1–12 source implementation is wired: local media ingestion, explicit model acquisition, bounded on-device ASR, transcript-only translation, local Vietnamese TTS, quality-normalized soundtrack mixing/remux, durable recovery, single-clock playback with PiP, local library/share/delete, iOS StoreKit 2 pre-wiring, and release privacy/security checks. Home and Library remain backed by real saved outputs; final exported media preserves original soundtrack/BGM/SFX. Clean Background/source separation is intentionally unavailable rather than simulated. Android local build/test evidence is collected on Windows; MEIZU physical evidence and macOS/iOS CI verdict remain user-owned external evidence.

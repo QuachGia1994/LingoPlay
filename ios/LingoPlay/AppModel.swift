@@ -51,6 +51,7 @@ final class AppModel {
     var mixState: MixState = .idle
     var modelInstallState: ASRModelInstallState = .notInstalled
     var plusPresented = false
+    var pendingRecovery: ProcessingRecoveryCheckpoint?
     var processedMedia: LocalDubMediaResult?
     var libraryItems: [LocalLibraryItem] = []
     var libraryBytes: Int64 = 0
@@ -73,6 +74,8 @@ final class AppModel {
     private let ttsService = SystemVietnameseTTSService()
     private let timelineMixService = TimelineMixService()
     private let libraryStore = LocalLibraryStore()
+    private let processingRecoveryStore = ProcessingRecoveryStore()
+    private let diagnostics = LocalDiagnostics()
     private var playbackMixContext: PlaybackMixContext?
     private var playbackTimeObserver: Any?
     private var modelInstallTask: Task<Void, Never>?
@@ -83,6 +86,8 @@ final class AppModel {
         Task {
             await refreshLibrary()
             await refreshModelState()
+            pendingRecovery = await processingRecoveryStore.load()
+            if pendingRecovery != nil { await diagnostics.record("recovery_available") }
         }
     }
 
@@ -92,6 +97,11 @@ final class AppModel {
     }
 
     func importMedia(from url: URL) async {
+        let previousMedia = selectedMedia
+        teardownPlayback()
+        await processingRecoveryStore.clear(deleteMedia: true)
+        await processingRecoveryStore.deleteOwnedImportedMedia(previousMedia)
+        pendingRecovery = nil
         mediaState = .importing
         asrState = .idle
         translationState = .idle
@@ -101,19 +111,33 @@ final class AppModel {
         activeLibraryItem = nil
         activeLibraryURL = nil
         liveBlendAvailable = false
-        teardownPlayback()
         processingProgress = 0
         do {
             selectedMedia = try await mediaService.importMedia(from: url)
+            await diagnostics.record("import_completed")
             mediaState = .ready
             stage = .prepare
         } catch {
+            await diagnostics.record("import_failed")
             mediaState = .failed(error.localizedDescription)
         }
     }
 
+    func cancelPreparation() {
+        let media = selectedMedia
+        selectedMedia = nil
+        mediaState = .idle
+        pendingRecovery = nil
+        stage = .home
+        Task {
+            await processingRecoveryStore.clear(deleteMedia: true)
+            await processingRecoveryStore.deleteOwnedImportedMedia(media)
+            await diagnostics.record("preparation_cancelled")
+        }
+    }
+
     func beginProcessing() {
-        guard selectedMedia != nil else {
+        guard let selectedMedia else {
             importerPresented = true
             return
         }
@@ -125,7 +149,11 @@ final class AppModel {
         processedMedia = nil
         teardownPlayback()
         stage = .processing
-        Task { await prepareAudio() }
+        pendingRecovery = nil
+        Task {
+            try? await processingRecoveryStore.save(media: selectedMedia)
+            await prepareAudio()
+        }
     }
 
     func prepareAudio() async {
@@ -134,9 +162,11 @@ final class AppModel {
         do {
             let audioURL = try await mediaService.extractAudio(from: selectedMedia)
             mediaState = .audioReady(audioURL)
+            try? await processingRecoveryStore.save(media: selectedMedia, preparedAudioURL: audioURL)
             processingProgress = 0.2
             await recognizeSpeech(from: audioURL)
         } catch {
+            await diagnostics.record("audio_preparation_failed")
             mediaState = .failed(error.localizedDescription)
         }
     }
@@ -155,6 +185,7 @@ final class AppModel {
             processingProgress = 0.4
             await translateTranscript(transcript)
         } catch {
+            await diagnostics.record("asr_failed")
             asrState = .failed(error.localizedDescription)
         }
     }
@@ -179,6 +210,7 @@ final class AppModel {
             processingProgress = 0.6
             await synthesizeVietnameseSpeech(document)
         } catch {
+            await diagnostics.record("translation_failed")
             translationState = .failed(error.localizedDescription)
         }
     }
@@ -194,8 +226,10 @@ final class AppModel {
             processingProgress = 0.8
             await renderDubbedMedia(dub)
         } catch TTSError.offlineVietnameseVoiceMissing {
+            await diagnostics.record("tts_voice_missing")
             ttsState = .voiceMissing
         } catch {
+            await diagnostics.record("tts_failed")
             ttsState = .failed(error.localizedDescription)
         }
     }
@@ -227,6 +261,9 @@ final class AppModel {
                 result: result,
                 translation: translation
             )
+            await processingRecoveryStore.clear(deleteMedia: false)
+            pendingRecovery = nil
+            await diagnostics.record("processing_completed")
             activeLibraryItem = saved
             activeLibraryURL = await libraryStore.videoURL(for: saved)
             await refreshLibrary()
@@ -236,6 +273,7 @@ final class AppModel {
             try await configurePlayback(with: result, dub: dub)
             stage = .player
         } catch {
+            await diagnostics.record("mix_failed")
             mixState = .failed(error.localizedDescription)
         }
     }
@@ -279,6 +317,7 @@ final class AppModel {
             } catch is CancellationError {
                 await refreshModelState()
             } catch {
+                await diagnostics.record("model_install_failed")
                 modelInstallState = .failed(error.localizedDescription)
             }
         }
@@ -286,6 +325,36 @@ final class AppModel {
 
     func cancelSpeechModelInstall() {
         modelInstallTask?.cancel()
+    }
+
+    func resumePendingProcessing() {
+        guard let recovery = pendingRecovery else { return }
+        Task { await diagnostics.record("recovery_resumed") }
+        selectedMedia = recovery.media
+        processingProgress = recovery.canResumeFromAudio ? 0.2 : 0
+        asrState = .idle
+        translationState = .idle
+        ttsState = .idle
+        mixState = .idle
+        processedMedia = nil
+        teardownPlayback()
+        pendingRecovery = nil
+        stage = .processing
+        if let audioURL = recovery.preparedAudioURL, recovery.canResumeFromAudio {
+            mediaState = .audioReady(audioURL)
+            Task { await recognizeSpeech(from: audioURL) }
+        } else {
+            mediaState = .ready
+            Task { await prepareAudio() }
+        }
+    }
+
+    func discardPendingProcessing() {
+        pendingRecovery = nil
+        Task {
+            await diagnostics.record("recovery_discarded")
+            await processingRecoveryStore.clear(deleteMedia: true)
+        }
     }
 
     func deleteSpeechModel() {
@@ -385,6 +454,7 @@ final class AppModel {
     private func configurePlayback(with result: LocalDubMediaResult, dub: DubSpeechDocument) async throws {
         guard let selectedMedia else { return }
         teardownPlayback()
+        try preparePlaybackAudioSession()
 
         let session = try await timelineMixService.makePlaybackSession(
             media: selectedMedia,
@@ -404,6 +474,7 @@ final class AppModel {
 
     private func configureSavedPlayback(url: URL, duration: TimeInterval) {
         teardownPlayback()
+        try? preparePlaybackAudioSession()
         let player = AVPlayer(url: url)
         videoPlayer = player
         playbackDuration = max(0, duration)
@@ -411,6 +482,12 @@ final class AppModel {
         isPlaying = false
         liveBlendAvailable = false
         installPlaybackObserver(on: player)
+    }
+
+    private func preparePlaybackAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .moviePlayback)
+        try session.setActive(true)
     }
 
     private func installPlaybackObserver(on player: AVPlayer) {
@@ -469,8 +546,21 @@ final class AppModel {
     }
 
     func returnHome() {
-        pausePlayback()
+        let previousStage = stage
+        let mediaToRelease = selectedMedia
+        if previousStage == .player {
+            teardownPlayback()
+            if activeLibraryItem != nil {
+                selectedMedia = nil
+                Task { await processingRecoveryStore.deleteOwnedImportedMedia(mediaToRelease) }
+            }
+        } else {
+            pausePlayback()
+        }
         selectedTab = .home
+        if previousStage == .processing {
+            Task { pendingRecovery = await processingRecoveryStore.load() }
+        }
         stage = .home
     }
 

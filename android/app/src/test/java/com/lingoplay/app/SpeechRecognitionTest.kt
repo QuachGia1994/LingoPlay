@@ -28,6 +28,13 @@ class SpeechRecognitionTest {
     }
 
     @Test
+    fun skipsNearSilentChunksBeforeWhisper() {
+        assertTrue(!ASRAudioGate.hasLikelySpeech(FloatArray(16_000) { 0.0005f }))
+        val speechLike = FloatArray(16_000) { index -> if (index % 20 < 10) 0.04f else -0.04f }
+        assertTrue(ASRAudioGate.hasLikelySpeech(speechLike))
+    }
+
+    @Test
     fun prefersAQuietBoundaryNearTheEndOfAChunk() {
         val sampleRate = 1_000
         val targetSize = 10_000

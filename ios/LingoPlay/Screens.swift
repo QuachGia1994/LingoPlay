@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import CoreTransferable
 import PhotosUI
 import StoreKit
@@ -98,6 +99,30 @@ struct HomeView: View {
                         .foregroundStyle(LPTheme.secondaryText)
                 }
                 .lpCard()
+
+                if let recovery = model.pendingRecovery {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(model.uiText("Interrupted dub", "Bản lồng tiếng bị gián đoạn"), systemImage: "arrow.clockwise.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(LPTheme.accent)
+                        Text(recovery.media.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(model.uiText("Resume from the last durable local boundary. Media remains in LingoPlay storage.", "Tiếp tục từ mốc cục bộ an toàn gần nhất. Media vẫn nằm trong bộ nhớ LingoPlay."))
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                        LPPrimaryButton(title: model.uiText("Resume Processing", "Tiếp tục xử lý"), systemImage: "play.fill") {
+                            model.resumePendingProcessing()
+                        }
+                        Button(role: .destructive) {
+                            model.discardPendingProcessing()
+                        } label: {
+                            Text(model.uiText("Discard interrupted session", "Bỏ phiên bị gián đoạn"))
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .lpCard()
+                }
 
                 LPSectionHeader(title: model.uiText("Recent", "Gần đây"), trailing: model.uiText("Local library", "Thư viện cục bộ"))
 
@@ -240,7 +265,7 @@ struct PrepareView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                ScreenHeader(title: model.uiText("Prepare", "Chuẩn bị"), backAction: model.returnHome)
+                ScreenHeader(title: model.uiText("Prepare", "Chuẩn bị"), backAction: model.cancelPreparation)
 
                 VStack(spacing: 12) {
                     VideoPlaceholder(width: nil, height: 190)
@@ -273,7 +298,9 @@ struct PrepareView: View {
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: "Nam · Natural", detail: "Warm, clear Vietnamese voice")
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: "Balanced", detail: "Quality and processing speed")
+                    PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: "Balanced", detail: "Adaptive soundtrack ducking + smoother transitions")
+                    Divider().overlay(LPTheme.border)
+                    PrepareSetting(icon: "waveform.path.ecg", title: "Clean Background", value: "Unavailable", detail: "Source-separation engine is not bundled yet")
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "captions.bubble.fill", title: "Subtitles", value: "Bilingual", detail: "Original + translated")
                 }
@@ -425,7 +452,7 @@ struct ProcessingView: View {
                     .lpCard()
                 }
 
-                Label("Processing is designed to continue locally while the app remains active. Background execution is a Plus capability in the product roadmap.", systemImage: "iphone.gen3")
+                Label("If iOS suspends or terminates LingoPlay, the app keeps a local recovery checkpoint and offers Resume on Home. PiP is for playback; processing is not falsely promised as unlimited background execution.", systemImage: "arrow.clockwise.icloud.fill")
                     .font(.caption)
                     .foregroundStyle(LPTheme.secondaryText)
                     .lpCard()
@@ -691,30 +718,10 @@ struct PlayerView: View {
                 }
 
                 if let player = model.videoPlayer {
-                    ZStack(alignment: .bottom) {
-                        LocalVideoSurface(player: player)
-                            .frame(height: 250)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .background(.black, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        HStack(spacing: 34) {
-                            Button { model.skipPlayback(seconds: -10) } label: {
-                                Image(systemName: "gobackward.10")
-                            }
-                            Button { model.togglePlayback() } label: {
-                                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.title2)
-                            }
-                            Button { model.skipPlayback(seconds: 10) } label: {
-                                Image(systemName: "goforward.10")
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .font(.body.bold())
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 13)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 14)
-                    }
+                    LocalVideoSurface(player: player)
+                        .frame(height: 250)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(.black, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 } else {
                     VideoPlaceholder(width: nil, height: 250)
                     VStack(alignment: .leading, spacing: 8) {
@@ -822,25 +829,22 @@ struct PlayerView: View {
     }
 }
 
-private struct LocalVideoSurface: UIViewRepresentable {
+private struct LocalVideoSurface: UIViewControllerRepresentable {
     let player: AVPlayer
 
-    func makeUIView(context: Context) -> PlayerSurfaceView {
-        let view = PlayerSurfaceView()
-        view.playerLayer.videoGravity = .resizeAspect
-        view.playerLayer.player = player
-        view.backgroundColor = .black
-        return view
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.videoGravity = .resizeAspect
+        controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        return controller
     }
 
-    func updateUIView(_ uiView: PlayerSurfaceView, context: Context) {
-        uiView.playerLayer.player = player
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.player = player
     }
-}
-
-private final class PlayerSurfaceView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 private struct SubtitleLine: View {

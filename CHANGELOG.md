@@ -29,6 +29,10 @@ All notable changes to LingoPlay are documented here.
 - iOS Stage 8 WhisperKit Tiny acquisition with explicit download, prewarm/load validation, durable active-model pointer, and processing resume from already-prepared audio after installation.
 - Stage 9 iOS StoreKit 2 Plus pre-wiring with weekly/monthly product IDs, product loading, verified-transaction entitlements, purchase/pending/cancel/restore handling, and transaction update reconciliation.
 - Local `Products.storekit` subscription catalog plus XcodeGen Run-scheme StoreKit configuration so Plus purchase flows can be tested before an Apple Developer account/App Store Connect products exist.
+- Stage 10 dubbing-quality hardening: near-silence ASR gating, silence-aware bounded chunk boundaries, Android speech RMS normalization, soft limiting, and smoother iOS soundtrack ducking.
+- A truthful Clean Background capability state on both clients. The current build does not claim ML source separation because no verified cross-platform separator engine is bundled yet.
+- Stage 11 durable processing recovery: app-owned imported media, local checkpoints, Resume/Discard after interruption, Android Picture-in-Picture, and native iOS AVPlayerViewController Picture-in-Picture on the existing single player.
+- Stage 12 local-only bounded diagnostics, iOS PrivacyInfo.xcprivacy required-reason declarations, Android cleartext-network blocking, and CI privacy/security verification.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
@@ -50,3 +54,8 @@ All notable changes to LingoPlay are documented here.
 - StoreKit 2 verified purchases now enable the local Plus entitlement before `Transaction.finish()`, then reconcile from `currentEntitlements` after finish.
 - Android ASR chunking now prefers a low-energy quiet boundary within the final 2 seconds of each bounded chunk, reducing word/sentence cuts while retaining a hard-size fallback for continuous speech/music.
 - Android Processing reuses already extracted audio after an explicit model install instead of demuxing the same source video again; the temporary audio is deleted after successful ASR or when a different media item is selected.
+- Imported media is now copied into app-owned cache before processing so recovery never depends on a temporary Photo Picker grant. Obsolete preparation/recovery sessions explicitly clean their app-owned media.
+- Processing copy no longer promises unlimited background execution. Both clients recover from a durable local boundary after interruption, while PiP is scoped to playback.
+- Android release networking rejects cleartext HTTP; production translation/model endpoints must be HTTPS.
+- Local diagnostics record only timestamped event codes and are never uploaded by LingoPlay.
+- Android CI artifacts are split by purpose: debug APK, signed release-test APK, release AAB, and reports. The intermediate unsigned release APK is verified in CI but no longer uploaded, avoiding the previous oversized all-in-one artifact download.

@@ -73,8 +73,8 @@ enum TimelineMixError: LocalizedError {
 
 @MainActor
 final class TimelineMixService {
-    private let duckFloor: Float = 0.12
-    private let duckFadeSeconds = 0.08
+    private let duckFloor: Float = 0.16
+    private let duckFadeSeconds = 0.12
     private let cacheMaxAge: TimeInterval = 24 * 60 * 60
     private let cacheMaxBytes: Int64 = 2 * 1024 * 1024 * 1024
     private let cacheTargetBytes: Int64 = 1536 * 1024 * 1024
@@ -331,7 +331,7 @@ final class TimelineMixService {
             dubTrack: outputDubTrack,
             speechSegments: speechSegments,
             originalBaseVolume: 1,
-            dubVolume: 0.95,
+            dubVolume: 0.92,
             duckStrength: 1
         )
         try await export(exporter, to: destination, as: .m4a)

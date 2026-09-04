@@ -1,7 +1,10 @@
 package com.lingoplay.app
 
+import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
+import android.util.Rational
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -48,6 +51,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Replay10
@@ -143,6 +147,7 @@ fun LingoPlayApp() {
     var mixError by rememberSaveable { mutableStateOf<String?>(null) }
     var libraryItems by remember { mutableStateOf<List<LocalLibraryItem>>(emptyList()) }
     var activeLibraryItem by remember { mutableStateOf<LocalLibraryItem?>(null) }
+    var pendingRecovery by remember { mutableStateOf<ProcessingCheckpoint?>(null) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -206,6 +211,9 @@ fun LingoPlayApp() {
         }
         preparedAudioFile?.delete()
         preparedAudioFile = null
+        ProcessingCheckpointStore.clear(context, deleteMedia = true)
+        pendingRecovery = null
+        LocalMediaRepository.deleteOwnedImport(selectedMedia)
         mediaState = MediaPreparationState.IMPORTING.name
         mediaError = null
         asrPhaseName = ASRPhase.IDLE.name
@@ -227,10 +235,12 @@ fun LingoPlayApp() {
         activeLibraryItem = null
         scope.launch {
             try {
-                selectedMedia = LocalMediaRepository.inspect(context, uri)
+                selectedMedia = LocalMediaRepository.importMedia(context, uri)
+                LocalDiagnostics.record(context, "import_completed")
                 mediaState = MediaPreparationState.READY.name
                 stageName = Stage.PREPARE.name
             } catch (error: Throwable) {
+                LocalDiagnostics.record(context, "import_failed")
                 mediaState = MediaPreparationState.FAILED.name
                 mediaError = error.message ?: "Unable to inspect this local video."
             }
@@ -239,6 +249,8 @@ fun LingoPlayApp() {
 
     LaunchedEffect(Unit) {
         libraryItems = LocalLibraryStore.load(context)
+        pendingRecovery = ProcessingCheckpointStore.load(context)
+        if (pendingRecovery != null) LocalDiagnostics.record(context, "recovery_available")
         if (stageName == Stage.SPLASH.name) {
             delay(900)
             stageName = Stage.HOME.name
@@ -260,6 +272,7 @@ fun LingoPlayApp() {
                     LocalMediaRepository.extractAudio(context, media).also { extracted ->
                         preparedAudioFile = extracted
                         mediaState = MediaPreparationState.AUDIO_READY.name
+                        ProcessingCheckpointStore.save(context, media, extracted)
                     }
                 }
                 val model = ASRModelStore.findWhisperModel(context)
@@ -306,6 +319,9 @@ fun LingoPlayApp() {
                                     }
                                 }
                                 val saved = LocalLibraryStore.save(context, media, rendered, translationDocument)
+                                LocalDiagnostics.record(context, "processing_completed")
+                                ProcessingCheckpointStore.clear(context, deleteMedia = true)
+                                pendingRecovery = null
                                 libraryItems = LocalLibraryStore.load(context)
                                 activeLibraryItem = saved
                                 selectedMedia = LocalLibraryStore.importedMedia(saved)
@@ -315,18 +331,22 @@ fun LingoPlayApp() {
                                 delay(300)
                                 stageName = Stage.PLAYER.name
                             } catch (error: Throwable) {
+                                LocalDiagnostics.record(context, "mix_failed")
                                 mixPhaseName = MixPhase.FAILED.name
                                 mixError = error.message ?: "Local audio mixing or video remux failed."
                             }
                         } catch (_: OfflineVietnameseVoiceMissingException) {
+                            LocalDiagnostics.record(context, "tts_voice_missing")
                             ttsPhaseName = TTSPhase.VOICE_MISSING.name
                         } catch (error: Throwable) {
+                            LocalDiagnostics.record(context, "tts_failed")
                             ttsPhaseName = TTSPhase.FAILED.name
                             ttsError = error.message ?: "Vietnamese speech synthesis failed."
                         }
                     }
                 }
             } catch (error: Throwable) {
+                LocalDiagnostics.record(context, "processing_failed")
                 if (mediaState == MediaPreparationState.EXTRACTING_AUDIO.name) {
                     mediaState = MediaPreparationState.FAILED.name
                     mediaError = error.message ?: "Audio preparation failed."
@@ -375,12 +395,23 @@ fun LingoPlayApp() {
 
                     Stage.PREPARE -> PrepareScreen(
                         media = selectedMedia,
-                        onBack = { stageName = Stage.HOME.name },
+                        onBack = {
+                            preparedAudioFile?.delete()
+                            preparedAudioFile = null
+                            ProcessingCheckpointStore.clear(context, deleteMedia = true)
+                            LocalMediaRepository.deleteOwnedImport(selectedMedia)
+                            selectedMedia = null
+                            mediaState = MediaPreparationState.IDLE.name
+                            stageName = Stage.HOME.name
+                        },
                         onEdit = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onTranslate = {
-                            if (selectedMedia == null) {
+                            val media = selectedMedia
+                            if (media == null) {
                                 mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
                             } else {
+                                ProcessingCheckpointStore.save(context, media, preparedAudioFile)
+                                pendingRecovery = null
                                 stageName = Stage.PROCESSING.name
                             }
                         },
@@ -408,7 +439,10 @@ fun LingoPlayApp() {
                         modelInstallState = modelInstallState,
                         onInstallModel = startModelInstall,
                         onCancelModel = cancelModelInstall,
-                        onBack = { stageName = Stage.HOME.name },
+                        onBack = {
+                            pendingRecovery = ProcessingCheckpointStore.load(context)
+                            stageName = Stage.HOME.name
+                        },
                     )
 
                     Stage.PLAYER -> PlayerScreen(
@@ -417,6 +451,16 @@ fun LingoPlayApp() {
                         translation = translationDocument,
                         audioBlend = audioBlend,
                         onAudioBlendChange = { audioBlend = it },
+                        onEnterPip = {
+                            val activity = context as? Activity
+                            if (activity != null && processedSupportsPip(mixResult)) {
+                                activity.enterPictureInPictureMode(
+                                    PictureInPictureParams.Builder()
+                                        .setAspectRatio(Rational(16, 9))
+                                        .build(),
+                                )
+                            }
+                        },
                         onShare = {
                             activeLibraryItem?.let { item ->
                                 context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
@@ -429,7 +473,25 @@ fun LingoPlayApp() {
                         Tab.HOME -> HomeScreen(
                             language = uiLanguage,
                             items = libraryItems,
+                            recovery = pendingRecovery,
                             onImport = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                            onResumeRecovery = { checkpoint ->
+                                LocalDiagnostics.record(context, "recovery_resumed")
+                                selectedMedia = checkpoint.media
+                                preparedAudioFile = checkpoint.preparedAudioFile
+                                mediaState = if (checkpoint.canResumeFromAudio) MediaPreparationState.AUDIO_READY.name else MediaPreparationState.READY.name
+                                asrPhaseName = ASRPhase.IDLE.name
+                                translationPhaseName = TranslationPhase.IDLE.name
+                                ttsPhaseName = TTSPhase.IDLE.name
+                                mixPhaseName = MixPhase.IDLE.name
+                                pendingRecovery = null
+                                stageName = Stage.PROCESSING.name
+                            },
+                            onDiscardRecovery = {
+                                LocalDiagnostics.record(context, "recovery_discarded")
+                                ProcessingCheckpointStore.clear(context, deleteMedia = true)
+                                pendingRecovery = null
+                            },
                             onOpenItem = { item ->
                                 activeLibraryItem = item
                                 selectedMedia = LocalLibraryStore.importedMedia(item)
@@ -528,7 +590,10 @@ private fun SplashScreen() {
 private fun HomeScreen(
     language: UiLanguage,
     items: List<LocalLibraryItem>,
+    recovery: ProcessingCheckpoint?,
     onImport: () -> Unit,
+    onResumeRecovery: (ProcessingCheckpoint) -> Unit,
+    onDiscardRecovery: () -> Unit,
     onOpenItem: (LocalLibraryItem) -> Unit,
 ) {
     ScreenScroll {
@@ -558,6 +623,22 @@ private fun HomeScreen(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.Shield, contentDescription = null, tint = LpCyan, modifier = Modifier.size(16.dp))
                 Text(language.text("Video and audio are never uploaded", "Video và audio không bao giờ được tải lên server"), color = LpSecondaryText, fontSize = 12.sp)
+            }
+        }
+
+        if (recovery != null) {
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = LpCyan)
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(language.text("Interrupted dub", "Bản lồng tiếng bị gián đoạn"), fontWeight = FontWeight.Bold)
+                        Text(recovery.media.name, color = LpSecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Text(language.text("Resume from the last durable local boundary. Media stays in LingoPlay storage.", "Tiếp tục từ mốc cục bộ an toàn gần nhất. Media vẫn nằm trong bộ nhớ LingoPlay."), color = LpSecondaryText, fontSize = 12.sp)
+                PrimaryAction(language.text("Resume processing", "Tiếp tục xử lý"), Icons.Rounded.PlayArrow) { onResumeRecovery(recovery) }
+                TextButton(onClick = onDiscardRecovery) { Text(language.text("Discard", "Bỏ phiên")) }
             }
         }
 
@@ -606,7 +687,9 @@ private fun PrepareScreen(media: LocalMediaItem?, onBack: () -> Unit, onEdit: ()
             CardDivider()
             PrepareRow(Icons.Rounded.Person, "AI Voice", "Nam · Natural", "Warm, clear Vietnamese voice")
             CardDivider()
-            PrepareRow(Icons.Rounded.Tune, "Dubbing mode", "Balanced", "Quality and processing speed")
+            PrepareRow(Icons.Rounded.Tune, "Dubbing mode", "Balanced", "Normalized voice + adaptive soundtrack ducking")
+            CardDivider()
+            PrepareRow(Icons.Rounded.AutoAwesome, "Clean Background", "Unavailable", "Source-separation engine is not bundled yet")
             CardDivider()
             PrepareRow(Icons.Rounded.Subtitles, "Subtitles", "Bilingual", "Original + translated")
         }
@@ -778,7 +861,7 @@ private fun ProcessingScreen(
         LpCard {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Icon(Icons.Rounded.Info, contentDescription = null, tint = LpCyan)
-                Text("The production pipeline will keep media processing local. Background execution remains a planned Plus capability.", color = LpSecondaryText, fontSize = 13.sp)
+                Text("If Android suspends or terminates LingoPlay, a local recovery checkpoint can be resumed from Home. PiP is for playback; processing is not falsely promised as unlimited background execution.", color = LpSecondaryText, fontSize = 13.sp)
             }
         }
 
@@ -877,6 +960,7 @@ private fun PlayerScreen(
     translation: TranslationDocument?,
     audioBlend: Float,
     onAudioBlendChange: (Float) -> Unit,
+    onEnterPip: () -> Unit,
     onShare: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -936,11 +1020,14 @@ private fun PlayerScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlayerAction(Icons.Rounded.ClosedCaption, "Subtitles", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Tune, "Mixed", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.Speed, "1.0x", Modifier.weight(1f))
+            PlayerAction(Icons.Rounded.PictureInPictureAlt, "PiP", Modifier.weight(1f), if (processed != null) onEnterPip else null)
             PlayerAction(Icons.Rounded.Share, "Share", Modifier.weight(1f), onShare)
         }
     }
 }
+
+private fun processedSupportsPip(processed: LocalDubMediaResult?): Boolean =
+    processed?.remuxedVideoFile?.isFile == true && processed.remuxedVideoFile.length() > 0L
 
 @Composable
 private fun SingleClockDubPlayer(
