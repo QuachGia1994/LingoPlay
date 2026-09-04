@@ -308,7 +308,9 @@ internal object ASRChunkBoundaryPolicy {
     private const val SEARCH_WINDOW_MS = 2_000
     private const val ENERGY_WINDOW_MS = 120
     private const val ENERGY_STEP_MS = 40
-    private const val SILENCE_RMS = 0.015f
+    private const val MIN_SILENCE_RMS = 0.002f
+    private const val MAX_SILENCE_RMS = 0.015f
+    private const val RELATIVE_SILENCE_RATIO = 0.35f
 
     fun chooseSplit(samples: FloatArray, size: Int, sampleRate: Int, targetSize: Int): Int {
         if (size < targetSize || sampleRate <= 0) return size
@@ -316,6 +318,13 @@ internal object ASRChunkBoundaryPolicy {
         val windowFrames = max(1, sampleRate * ENERGY_WINDOW_MS / 1_000)
         val stepFrames = max(1, sampleRate * ENERGY_STEP_MS / 1_000)
         val searchStart = max(windowFrames, size - searchFrames)
+        var chunkEnergy = 0.0
+        for (index in 0 until size) {
+            val sample = samples[index].toDouble()
+            chunkEnergy += sample * sample
+        }
+        val chunkRms = kotlin.math.sqrt(chunkEnergy / max(1, size)).toFloat()
+        val silenceThreshold = (chunkRms * RELATIVE_SILENCE_RATIO).coerceIn(MIN_SILENCE_RMS, MAX_SILENCE_RMS)
         var bestEnd = size
         var bestRms = Float.MAX_VALUE
         var end = searchStart
@@ -333,7 +342,7 @@ internal object ASRChunkBoundaryPolicy {
             }
             end += stepFrames
         }
-        return if (bestRms <= SILENCE_RMS) bestEnd.coerceIn(1, size) else size
+        return if (bestRms <= silenceThreshold) bestEnd.coerceIn(1, size) else size
     }
 }
 

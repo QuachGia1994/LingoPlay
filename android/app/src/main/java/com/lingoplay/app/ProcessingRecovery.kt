@@ -4,7 +4,17 @@ import android.content.Context
 import android.net.Uri
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
+
+internal class ProcessingRunGate {
+    private val mutex = Mutex()
+
+    suspend fun <T> run(block: suspend () -> T): T = mutex.withLock { block() }
+}
 
 data class ProcessingCheckpoint(
     val media: LocalMediaItem,
@@ -57,15 +67,23 @@ object ProcessingCheckpointStore {
         }
         val temp = File(file.parentFile, "$FILE_NAME.tmp")
         temp.writeText(json.toString(), Charsets.UTF_8)
-        if (file.exists()) file.delete()
-        check(temp.renameTo(file)) { "Unable to persist processing recovery checkpoint." }
+        try {
+            Files.move(
+                temp.toPath(),
+                file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: Throwable) {
+            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     fun clear(context: Context, deleteMedia: Boolean) {
         val checkpoint = load(context)
         checkpointFile(context).delete()
         checkpoint?.preparedAudioFile?.delete()
-        if (deleteMedia) LocalMediaRepository.deleteOwnedImport(checkpoint?.media)
+        if (deleteMedia) LocalMediaRepository.deleteOwnedImport(context, checkpoint?.media)
     }
 
     private fun checkpointFile(context: Context): File = File(File(context.filesDir, ROOT), FILE_NAME)

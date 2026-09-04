@@ -78,6 +78,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -151,6 +152,7 @@ fun LingoPlayApp() {
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val processingGate = remember { ProcessingRunGate() }
     val uiPreferences = remember(context) { context.getSharedPreferences("lingoplay_ui", Context.MODE_PRIVATE) }
     var wifiOnly by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("wifi_only", true)) }
     var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
@@ -209,40 +211,42 @@ fun LingoPlayApp() {
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        preparedAudioFile?.delete()
-        preparedAudioFile = null
-        ProcessingCheckpointStore.clear(context, deleteMedia = true)
-        pendingRecovery = null
-        LocalMediaRepository.deleteOwnedImport(selectedMedia)
-        mediaState = MediaPreparationState.IMPORTING.name
-        mediaError = null
-        asrPhaseName = ASRPhase.IDLE.name
-        asrTranscript = null
-        asrError = null
-        translationPhaseName = TranslationPhase.IDLE.name
-        translationDocument = null
-        translationError = null
-        translationBatch = 0
-        translationBatchTotal = 0
-        ttsPhaseName = TTSPhase.IDLE.name
-        dubSpeechDocument = null
-        ttsError = null
-        ttsSegment = 0
-        ttsSegmentTotal = 0
-        mixPhaseName = MixPhase.IDLE.name
-        mixResult = null
-        mixError = null
-        activeLibraryItem = null
         scope.launch {
-            try {
-                selectedMedia = LocalMediaRepository.importMedia(context, uri)
-                LocalDiagnostics.record(context, "import_completed")
-                mediaState = MediaPreparationState.READY.name
-                stageName = Stage.PREPARE.name
-            } catch (error: Throwable) {
-                LocalDiagnostics.record(context, "import_failed")
-                mediaState = MediaPreparationState.FAILED.name
-                mediaError = error.message ?: "Unable to inspect this local video."
+            processingGate.run {
+                preparedAudioFile?.delete()
+                preparedAudioFile = null
+                ProcessingCheckpointStore.clear(context, deleteMedia = true)
+                pendingRecovery = null
+                LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
+                mediaState = MediaPreparationState.IMPORTING.name
+                mediaError = null
+                asrPhaseName = ASRPhase.IDLE.name
+                asrTranscript = null
+                asrError = null
+                translationPhaseName = TranslationPhase.IDLE.name
+                translationDocument = null
+                translationError = null
+                translationBatch = 0
+                translationBatchTotal = 0
+                ttsPhaseName = TTSPhase.IDLE.name
+                dubSpeechDocument = null
+                ttsError = null
+                ttsSegment = 0
+                ttsSegmentTotal = 0
+                mixPhaseName = MixPhase.IDLE.name
+                mixResult = null
+                mixError = null
+                activeLibraryItem = null
+                try {
+                    selectedMedia = LocalMediaRepository.importMedia(context, uri)
+                    LocalDiagnostics.record(context, "import_completed")
+                    mediaState = MediaPreparationState.READY.name
+                    stageName = Stage.PREPARE.name
+                } catch (error: Throwable) {
+                    LocalDiagnostics.record(context, "import_failed")
+                    mediaState = MediaPreparationState.FAILED.name
+                    mediaError = error.message ?: "Unable to inspect this local video."
+                }
             }
         }
     }
@@ -258,6 +262,7 @@ fun LingoPlayApp() {
     }
 
     LaunchedEffect(stageName, selectedMedia?.uri, modelInstalled) {
+        processingGate.run {
         val media = selectedMedia
         val reusableAudio = preparedAudioFile?.takeIf(File::isFile)
         val canProcess = mediaState == MediaPreparationState.READY.name ||
@@ -284,8 +289,6 @@ fun LingoPlayApp() {
                     asrPhaseName = ASRPhase.TRANSCRIBING.name
                     asrTranscript = SherpaWhisperSpeechRecognizer.transcribe(context, audioFile, model)
                     asrPhaseName = ASRPhase.COMPLETED.name
-                    preparedAudioFile?.delete()
-                    preparedAudioFile = null
                     val transcript = asrTranscript ?: error("Speech transcript was not retained.")
                     if (BuildConfig.TRANSLATION_API_BASE_URL.isBlank()) {
                         translationPhaseName = TranslationPhase.ENDPOINT_MISSING.name
@@ -330,11 +333,15 @@ fun LingoPlayApp() {
                                 mixPhaseName = MixPhase.COMPLETED.name
                                 delay(300)
                                 stageName = Stage.PLAYER.name
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
                             } catch (error: Throwable) {
                                 LocalDiagnostics.record(context, "mix_failed")
                                 mixPhaseName = MixPhase.FAILED.name
                                 mixError = error.message ?: "Local audio mixing or video remux failed."
                             }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
                         } catch (_: OfflineVietnameseVoiceMissingException) {
                             LocalDiagnostics.record(context, "tts_voice_missing")
                             ttsPhaseName = TTSPhase.VOICE_MISSING.name
@@ -345,6 +352,8 @@ fun LingoPlayApp() {
                         }
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 LocalDiagnostics.record(context, "processing_failed")
                 if (mediaState == MediaPreparationState.EXTRACTING_AUDIO.name) {
@@ -358,6 +367,7 @@ fun LingoPlayApp() {
                     translationError = error.message ?: "Translation failed."
                 }
             }
+        }
         }
     }
 
@@ -399,7 +409,7 @@ fun LingoPlayApp() {
                             preparedAudioFile?.delete()
                             preparedAudioFile = null
                             ProcessingCheckpointStore.clear(context, deleteMedia = true)
-                            LocalMediaRepository.deleteOwnedImport(selectedMedia)
+                            LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
                             selectedMedia = null
                             mediaState = MediaPreparationState.IDLE.name
                             stageName = Stage.HOME.name
@@ -488,9 +498,13 @@ fun LingoPlayApp() {
                                 stageName = Stage.PROCESSING.name
                             },
                             onDiscardRecovery = {
-                                LocalDiagnostics.record(context, "recovery_discarded")
-                                ProcessingCheckpointStore.clear(context, deleteMedia = true)
-                                pendingRecovery = null
+                                scope.launch {
+                                    processingGate.run {
+                                        LocalDiagnostics.record(context, "recovery_discarded")
+                                        ProcessingCheckpointStore.clear(context, deleteMedia = true)
+                                        pendingRecovery = null
+                                    }
+                                }
                             },
                             onOpenItem = { item ->
                                 activeLibraryItem = item
@@ -964,6 +978,7 @@ private fun PlayerScreen(
     onShare: () -> Unit,
     onBack: () -> Unit,
 ) {
+    var pipAvailable by remember(processed?.remuxedVideoFile?.absolutePath) { mutableStateOf(false) }
     ScreenScroll {
         ScreenHeader(media?.name ?: "Preview", onBack) {
             Surface(color = LpViolet.copy(alpha = 0.30f), shape = RoundedCornerShape(50)) {
@@ -980,6 +995,7 @@ private fun PlayerScreen(
             SingleClockDubPlayer(
                 processed = processed,
                 translation = translation,
+                onPipAvailabilityChange = { pipAvailable = it },
             )
         } else {
             VideoPlaceholder(250.dp)
@@ -1020,7 +1036,7 @@ private fun PlayerScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlayerAction(Icons.Rounded.ClosedCaption, "Subtitles", Modifier.weight(1f))
             PlayerAction(Icons.Rounded.Tune, "Mixed", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.PictureInPictureAlt, "PiP", Modifier.weight(1f), if (processed != null) onEnterPip else null)
+            PlayerAction(Icons.Rounded.PictureInPictureAlt, "PiP", Modifier.weight(1f), if (processed != null && pipAvailable) onEnterPip else null)
             PlayerAction(Icons.Rounded.Share, "Share", Modifier.weight(1f), onShare)
         }
     }
@@ -1033,6 +1049,7 @@ private fun processedSupportsPip(processed: LocalDubMediaResult?): Boolean =
 private fun SingleClockDubPlayer(
     processed: LocalDubMediaResult,
     translation: TranslationDocument?,
+    onPipAvailabilityChange: (Boolean) -> Unit,
 ) {
     var videoView by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf<VideoView?>(null) }
     var videoReady by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf(false) }
@@ -1040,9 +1057,18 @@ private fun SingleClockDubPlayer(
     var currentMs by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(isPlaying, videoView) {
+        onPipAvailabilityChange(videoReady && isPlaying)
         while (isPlaying) {
             currentMs = videoView?.currentPosition?.coerceAtLeast(0) ?: currentMs
             delay(250)
+        }
+    }
+
+    DisposableEffect(videoView) {
+        onDispose {
+            onPipAvailabilityChange(false)
+            videoView?.pause()
+            videoView?.stopPlayback()
         }
     }
 
@@ -1060,9 +1086,11 @@ private fun SingleClockDubPlayer(
                     setVideoPath(processed.remuxedVideoFile.absolutePath)
                     setOnPreparedListener {
                         videoReady = true
+                        onPipAvailabilityChange(false)
                     }
                     setOnCompletionListener {
                         isPlaying = false
+                        onPipAvailabilityChange(false)
                         currentMs = processed.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                     }
                 }
@@ -1099,9 +1127,11 @@ private fun SingleClockDubPlayer(
                         if (isPlaying) {
                             view.pause()
                             isPlaying = false
+                            onPipAvailabilityChange(false)
                         } else {
                             view.start()
                             isPlaying = true
+                            onPipAvailabilityChange(true)
                         }
                     },
             )

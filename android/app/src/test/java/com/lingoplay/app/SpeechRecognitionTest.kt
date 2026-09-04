@@ -48,6 +48,27 @@ class SpeechRecognitionTest {
     }
 
     @Test
+    fun quietSpeechDoesNotBecomeFakeSilenceWithoutARealDip() {
+        val sampleRate = 1_000
+        val targetSize = 10_000
+        val samples = FloatArray(targetSize) { index -> if (index % 20 < 10) 0.008f else -0.008f }
+
+        assertEquals(targetSize, ASRChunkBoundaryPolicy.chooseSplit(samples, samples.size, sampleRate, targetSize))
+    }
+
+    @Test
+    fun quietSpeechStillFindsARelativeQuietBoundary() {
+        val sampleRate = 1_000
+        val targetSize = 10_000
+        val samples = FloatArray(targetSize) { index -> if (index % 20 < 10) 0.008f else -0.008f }
+        for (index in 8_400 until 8_800) samples[index] = 0.0008f
+
+        val split = ASRChunkBoundaryPolicy.chooseSplit(samples, samples.size, sampleRate, targetSize)
+
+        assertTrue(split in 8_400..8_920)
+    }
+
+    @Test
     fun fallsBackToHardBoundaryWhenNoQuietWindowExists() {
         val sampleRate = 1_000
         val targetSize = 10_000

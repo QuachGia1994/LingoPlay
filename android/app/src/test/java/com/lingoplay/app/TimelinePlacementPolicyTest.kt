@@ -30,6 +30,13 @@ class TimelinePlacementPolicyTest {
     }
 
     @Test
+    fun lowNoiseFloorIsNotAmplifiedBySpeechNormalizer() {
+        val noise = ShortArray(4_800) { index -> if (index % 2 == 0) 80 else -80 }
+        val normalized = AudioQualityPolicy.normalizeSpeech(noise)
+        assertEquals(80, normalized.maxOf { kotlin.math.abs(it.toInt()) })
+    }
+
+    @Test
     fun softLimiterPreservesNormalSamplesAndBoundsOverload() {
         assertEquals(12_000.toShort(), AudioQualityPolicy.softLimitPcm16(12_000))
         val overloaded = AudioQualityPolicy.softLimitPcm16(65_000).toInt()

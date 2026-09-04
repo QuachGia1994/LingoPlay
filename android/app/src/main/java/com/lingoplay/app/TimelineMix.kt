@@ -42,6 +42,8 @@ internal object AudioQualityPolicy {
     private const val TARGET_RMS = 0.14
     private const val PEAK_CEILING = 0.92
     private const val MAX_GAIN = 2.0
+    private const val MIN_NORMALIZE_RMS = 0.008
+    private const val MIN_NORMALIZE_PEAK = 0.03
     private const val SOFT_LIMIT_START = 0.90
 
     fun normalizeSpeech(samples: ShortArray): ShortArray {
@@ -54,6 +56,7 @@ internal object AudioQualityPolicy {
             peak = max(peak, kotlin.math.abs(value))
         }
         val rms = sqrt(energy / samples.size.toDouble())
+        if (rms < MIN_NORMALIZE_RMS && peak < MIN_NORMALIZE_PEAK) return samples
         if (rms <= 1e-6 || peak <= 1e-6) return samples
         val rmsGain = (TARGET_RMS / rms).coerceAtMost(MAX_GAIN)
         val peakGain = PEAK_CEILING / peak

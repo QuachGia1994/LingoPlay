@@ -75,10 +75,14 @@ object LocalMediaRepository {
         LocalMediaItem(uri, metadata.first ?: "Local video", durationMs, metadata.second ?: 0L, hasAudio)
     }
 
-    fun deleteOwnedImport(media: LocalMediaItem?) {
+    fun deleteOwnedImport(context: Context, media: LocalMediaItem?) {
         val uri = media?.uri ?: return
-        if (uri.scheme == "file" && uri.path?.contains("lingoplay${File.separator}imported-media") == true) {
-            runCatching { File(requireNotNull(uri.path)).delete() }
+        val path = uri.takeIf { it.scheme == "file" }?.path ?: return
+        runCatching {
+            val root = File(context.cacheDir, "lingoplay/imported-media").canonicalFile
+            val candidate = File(path).canonicalFile
+            val prefix = root.path + File.separator
+            if (candidate.path.startsWith(prefix)) candidate.delete()
         }
     }
 

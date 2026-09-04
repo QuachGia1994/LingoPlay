@@ -552,7 +552,10 @@ final class AppModel {
             teardownPlayback()
             if activeLibraryItem != nil {
                 selectedMedia = nil
-                Task { await processingRecoveryStore.deleteOwnedImportedMedia(mediaToRelease) }
+                let activeURL = activeLibraryURL?.standardizedFileURL
+                if mediaToRelease?.localURL.standardizedFileURL != activeURL {
+                    Task { await processingRecoveryStore.deleteOwnedImportedMedia(mediaToRelease) }
+                }
             }
         } else {
             pausePlayback()

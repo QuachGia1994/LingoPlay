@@ -59,3 +59,7 @@ All notable changes to LingoPlay are documented here.
 - Android release networking rejects cleartext HTTP; production translation/model endpoints must be HTTPS.
 - Local diagnostics record only timestamped event codes and are never uploaded by LingoPlay.
 - Android CI artifacts are split by purpose: debug APK, signed release-test APK, release AAB, and reports. The intermediate unsigned release APK is verified in CI but no longer uploaded, avoiding the previous oversized all-in-one artifact download.
+- Post-Stage-12 risk hardening serializes Android processing runs across Back/Resume/new-import/discard boundaries, preserves prepared audio until recovery is cleared, gates PiP on prepared+playing state, and explicitly releases VideoView on disposal.
+- Android ASR chunk-boundary silence detection is now relative to each chunk's RMS so quiet real speech is not mistaken for silence; very-low-level noise is no longer amplified by TTS normalization.
+- Android recovery checkpoint replacement now prefers atomic filesystem move and app-owned import deletion is canonical-root constrained.
+- iOS local diagnostics now rewrite atomically instead of appending in-place; return-home cleanup explicitly avoids the active Library URL.
