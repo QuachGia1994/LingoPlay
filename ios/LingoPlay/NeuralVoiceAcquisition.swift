@@ -413,7 +413,7 @@ private final class RangeFileDownloader: NSObject, URLSessionDataDelegate, @unch
 
     func download(_ request: URLRequest) async throws {
         try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 lock.lock()
                 if Task.isCancelled {
                     lock.unlock()
