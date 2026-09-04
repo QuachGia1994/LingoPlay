@@ -326,9 +326,10 @@ final class AppModel {
     }
 
     private func translationEndpoint() -> URL? {
-        let configured = Bundle.main.object(forInfoDictionaryKey: "LingoPlayTranslationAPIBaseURL") as? String
-        guard let configured, !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return URL(string: configured)
+        let configured = Bundle.main.object(
+            forInfoDictionaryKey: TranslationEndpointConfiguration.infoDictionaryKey
+        ) as? String
+        return TranslationEndpointConfiguration.resolve(plistValue: configured)
     }
 
     func refreshLibrary() async {

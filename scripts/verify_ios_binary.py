@@ -74,6 +74,7 @@ def main() -> int:
     parser.add_argument("--ipa", type=Path)
     parser.add_argument("--dsym", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--translation-base-url")
     args = parser.parse_args()
 
     app = args.app
@@ -92,6 +93,18 @@ def main() -> int:
     def emit(message: str) -> None:
         print(message)
         lines.append(message)
+
+    if args.translation_base_url is not None:
+        expected_endpoint = args.translation_base_url.strip()
+        if not expected_endpoint.startswith("https://"):
+            raise SystemExit("FAIL iOS binary: expected translation endpoint must be non-empty HTTPS")
+        actual_endpoint = info.get("LingoPlayTranslationAPIBaseURL")
+        if actual_endpoint != expected_endpoint:
+            raise SystemExit(
+                "FAIL iOS binary: translation endpoint mismatch "
+                f"actual={actual_endpoint!r} expected={expected_endpoint!r}"
+            )
+        emit(f"PASS bundled translation endpoint={actual_endpoint}")
 
     bundle_bytes = directory_size(app)
     if bundle_bytes > BUNDLE_LIMIT:

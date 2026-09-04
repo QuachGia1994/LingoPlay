@@ -34,7 +34,7 @@ targets:
         INFOPLIST_FILE: LingoPlay/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: LingoPlay
         INFOPLIST_KEY_LingoPlayTranslationAPIBaseURL: "$(LINGOPLAY_TRANSLATION_API_BASE_URL)"
-        LINGOPLAY_TRANSLATION_API_BASE_URL: ""
+        LINGOPLAY_TRANSLATION_API_BASE_URL: "https://lingoplay-api.kim-phong619.workers.dev"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

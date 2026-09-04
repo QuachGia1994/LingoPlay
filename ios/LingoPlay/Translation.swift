@@ -1,5 +1,33 @@
 import Foundation
 
+enum TranslationEndpointConfiguration {
+    static let infoDictionaryKey = "LingoPlayTranslationAPIBaseURL"
+    static let productionBaseURLString = "https://lingoplay-api.kim-phong619.workers.dev"
+
+    static func resolve(plistValue: String?) -> URL? {
+        if let override = validHTTPSBaseURL(plistValue) {
+            return override
+        }
+        return validHTTPSBaseURL(productionBaseURLString)
+    }
+
+    private static func validHTTPSBaseURL(_ value: String?) -> URL? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !trimmed.isEmpty,
+            let url = URL(string: trimmed),
+            url.scheme?.lowercased() == "https",
+            url.host != nil,
+            url.query == nil,
+            url.fragment == nil
+        else {
+            return nil
+        }
+        return url
+    }
+}
+
 struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
     let id: String
     let startMs: Int

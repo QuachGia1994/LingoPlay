@@ -104,6 +104,7 @@ jobs:
           --ipa build/LingoPlay-unsigned.ipa
           --dsym build/ios/Build/Products/Release-iphoneos/LingoPlay.app.dSYM
           --report build/reports/ios-release-audit.txt
+          --translation-base-url "$LINGOPLAY_TRANSLATION_API_BASE_URL"
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4

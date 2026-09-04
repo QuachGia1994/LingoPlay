@@ -105,8 +105,22 @@ require("LingoPlay-iOS-release-reports" in ios_workflow, "iOS CI publishes relea
 require("compileDebugAndroidTestKotlin" in android_workflow, "Android CI compiles instrumentation tests")
 require("ORG_GRADLE_PROJECT_LINGOPLAY_TRANSLATION_API_BASE_URL" in android_workflow, "Android CI injects translation backend URL")
 require("LINGOPLAY_TRANSLATION_API_BASE_URL" in ios_workflow, "iOS CI injects translation backend URL")
+require("--translation-base-url" in ios_workflow, "iOS CI verifies endpoint inside built app bundle")
 require("Verify translation backend wiring" in android_workflow, "Android CI fails closed when translation backend URL is missing")
 require("Verify translation backend wiring" in ios_workflow, "iOS CI fails closed when translation backend URL is missing")
+ios_info = (ROOT / "ios/LingoPlay/Info.plist").read_text(encoding="utf-8")
+require("LingoPlayTranslationAPIBaseURL" in ios_info, "iOS source Info.plist declares translation endpoint key")
+require("$(LINGOPLAY_TRANSLATION_API_BASE_URL)" in ios_info, "iOS source Info.plist expands translation endpoint build setting")
+require(
+    'LINGOPLAY_TRANSLATION_API_BASE_URL: "https://lingoplay-api.kim-phong619.workers.dev"' in project_spec,
+    "iOS project has deterministic public production endpoint default",
+)
+translation_source = (ROOT / "ios/LingoPlay/Translation.swift").read_text(encoding="utf-8")
+require("enum TranslationEndpointConfiguration" in translation_source, "iOS translation endpoint resolver exists")
+require(
+    "https://lingoplay-api.kim-phong619.workers.dev" in translation_source,
+    "iOS translation resolver has production fallback",
+)
 wrangler_spec = (ROOT / "backend/wrangler.jsonc").read_text(encoding="utf-8")
 require('"binding": "AI"' in wrangler_spec, "Cloudflare Worker keeps Workers AI binding")
 backend_source = (ROOT / "backend/src/index.ts").read_text(encoding="utf-8")

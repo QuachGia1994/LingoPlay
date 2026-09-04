@@ -2,6 +2,23 @@ import XCTest
 @testable import LingoPlay
 
 final class PolicyTests: XCTestCase {
+    func testTranslationEndpointUsesValidOverride() {
+        let override = "https://translation.example.test"
+        XCTAssertEqual(
+            TranslationEndpointConfiguration.resolve(plistValue: override)?.absoluteString,
+            override
+        )
+    }
+
+    func testTranslationEndpointFallsBackToProduction() {
+        let expected = TranslationEndpointConfiguration.productionBaseURLString
+        XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: nil)?.absoluteString, expected)
+        XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: "   ")?.absoluteString, expected)
+        XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: "not-a-url")?.absoluteString, expected)
+        XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: "http://unsafe.test")?.absoluteString, expected)
+        XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: "https://safe.test?q=1")?.absoluteString, expected)
+    }
+
     func testPlaybackSpeedSanitization() {
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(1.25), 1.25)
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(0), 1.0)
