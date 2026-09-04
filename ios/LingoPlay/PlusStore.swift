@@ -34,6 +34,7 @@ final class PlusStore {
                 guard let self else { return }
                 switch result {
                 case .verified(let transaction):
+                    self.applyVerifiedEntitlement(transaction)
                     await transaction.finish()
                     await self.refreshEntitlements()
                 case .unverified:
@@ -87,9 +88,10 @@ final class PlusStore {
             case .success(let result):
                 switch result {
                 case .verified(let transaction):
+                    applyVerifiedEntitlement(transaction)
+                    purchaseState = .idle
                     await transaction.finish()
                     await refreshEntitlements()
-                    purchaseState = .idle
                 case .unverified:
                     purchaseState = .failed("Purchase could not be verified.")
                     statusMessage = "Purchase could not be verified, so Plus access was not granted."
@@ -107,6 +109,14 @@ final class PlusStore {
             purchaseState = .failed(error.localizedDescription)
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func applyVerifiedEntitlement(_ transaction: Transaction) {
+        guard Self.productIDs.contains(transaction.productID),
+              transaction.revocationDate == nil
+        else { return }
+        if let expiration = transaction.expirationDate, expiration <= Date() { return }
+        isPlus = true
     }
 
     func restore() async {

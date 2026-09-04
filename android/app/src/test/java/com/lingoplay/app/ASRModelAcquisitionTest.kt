@@ -1,6 +1,8 @@
 package com.lingoplay.app
 
+import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.net.InetSocketAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -35,6 +37,38 @@ class ASRModelAcquisitionTest {
             assertFalse(ModelIntegrity.matches(file, valid.copy(sha256 = "0".repeat(64))))
         } finally {
             file.delete()
+        }
+    }
+
+    @Test
+    fun redirectResolutionPreservesRangeHeader() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var receivedRange: String? = null
+        server.createContext("/start") { exchange ->
+            exchange.responseHeaders.add("Location", "/cdn")
+            exchange.sendResponseHeaders(307, -1)
+            exchange.close()
+        }
+        server.createContext("/cdn") { exchange ->
+            receivedRange = exchange.requestHeaders.getFirst("Range")
+            val body = byteArrayOf(1)
+            exchange.sendResponseHeaders(206, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val connection = ASRModelInstaller.openDownloadConnection(
+                "http://127.0.0.1:${server.address.port}/start",
+                existingBytes = 123L,
+            )
+            try {
+                assertEquals(206, connection.responseCode)
+                assertEquals("bytes=123-", receivedRange)
+            } finally {
+                connection.disconnect()
+            }
+        } finally {
+            server.stop(0)
         }
     }
 

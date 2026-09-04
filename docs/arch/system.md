@@ -52,5 +52,13 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Android Play Billing is intentionally not introduced in Stage 9.
 - The backend `/v1/entitlements` response remains informational/free until account identity and server-side receipt/transaction verification are designed.
 
+## Risk hardening after Stage 9
+- Android model acquisition resolves redirect hops explicitly and reapplies the same `Range` header, so resumable downloads survive Hugging Face/CDN 3xx transitions.
+- Android bounded ASR chunks remain memory-safe but prefer a quiet low-RMS boundary near the end of the chunk; continuous audio falls back to the hard budget boundary.
+- Android retains the already extracted audio cache while ASR is blocked only by a missing model, then resumes recognition from that file after installation instead of re-demuxing the source video.
+- iOS Wi-Fi-only model acquisition waits for an actual `NWPathMonitor` callback rather than a fixed-delay sample of `currentPath`.
+- StoreKit 2 applies a verified active Plus entitlement before finishing the transaction, then reconciles against `currentEntitlements`; unverified transactions never grant access.
+- Stage 6 media protections remain authoritative: original soundtrack is preserved/ducked, Android remux is PTS-interleaved, AAC capability fallback/resampling is active, playback is single-clock, and rendered cache is age/size bounded.
+
 ## Current stage
 Stages 1–9 source implementation is wired: local media ingestion, audio preparation, on-device ASR, explicit model acquisition, transcript-only translation, local Vietnamese TTS/duration fitting, production-safe soundtrack mixing/remux, real playback, branded launcher/native launch surfaces, durable local-library persistence, native share/export/deletion, and iOS StoreKit 2 Plus pre-wiring. Home and Library are backed by real saved outputs; saved Library items are offline-capable. Final exported media preserves the original soundtrack/BGM/SFX and ducks it around Vietnamese speech instead of replacing it with a silent-gap dub track. Android Stage 6 has representative MEIZU Lucky 08 physical codec evidence; Stage 8 model-download physical validation on that device remains pending only while the device is disconnected. iOS Stage 8/9 runtime/build evidence comes from the push-triggered Xcode GitHub workflow rather than claims made from the Windows host.

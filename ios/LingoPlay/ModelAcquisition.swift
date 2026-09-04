@@ -162,14 +162,32 @@ actor WhisperModelInstaller {
     }
 }
 
+private final class NetworkPathOneShot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !completed else { return false }
+        completed = true
+        return true
+    }
+}
+
 private enum ModelNetworkPolicy {
     static func isUsingWiFi() async -> Bool {
         let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
         let queue = DispatchQueue(label: "com.lingoplay.model-network-gate")
-        monitor.start(queue: queue)
-        defer { monitor.cancel() }
-        try? await Task.sleep(for: .milliseconds(300))
-        return monitor.currentPath.status == .satisfied
+        let oneShot = NetworkPathOneShot()
+        return await withCheckedContinuation { continuation in
+            monitor.pathUpdateHandler = { path in
+                guard oneShot.claim() else { return }
+                monitor.cancel()
+                continuation.resume(returning: path.status == .satisfied)
+            }
+            monitor.start(queue: queue)
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.lingoplay.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SpeechRecognitionTest {
@@ -24,6 +25,28 @@ class SpeechRecognitionTest {
         assertEquals(2f, segments[1].startSeconds)
         assertEquals(2f, segments[1].endSeconds)
         assertEquals("world", segments[1].text)
+    }
+
+    @Test
+    fun prefersAQuietBoundaryNearTheEndOfAChunk() {
+        val sampleRate = 1_000
+        val targetSize = 10_000
+        val samples = FloatArray(targetSize) { 0.20f }
+        for (index in 8_400 until 8_800) samples[index] = 0.001f
+
+        val split = ASRChunkBoundaryPolicy.chooseSplit(samples, samples.size, sampleRate, targetSize)
+
+        assertTrue(split in 8_400..8_920)
+        assertTrue(split < targetSize)
+    }
+
+    @Test
+    fun fallsBackToHardBoundaryWhenNoQuietWindowExists() {
+        val sampleRate = 1_000
+        val targetSize = 10_000
+        val samples = FloatArray(targetSize) { 0.20f }
+
+        assertEquals(targetSize, ASRChunkBoundaryPolicy.chooseSplit(samples, samples.size, sampleRate, targetSize))
     }
 
     @Test

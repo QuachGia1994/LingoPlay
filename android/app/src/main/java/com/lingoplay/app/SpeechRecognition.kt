@@ -282,6 +282,39 @@ private object AndroidAudioDecoder {
     }
 }
 
+internal object ASRChunkBoundaryPolicy {
+    private const val SEARCH_WINDOW_MS = 2_000
+    private const val ENERGY_WINDOW_MS = 120
+    private const val ENERGY_STEP_MS = 40
+    private const val SILENCE_RMS = 0.015f
+
+    fun chooseSplit(samples: FloatArray, size: Int, sampleRate: Int, targetSize: Int): Int {
+        if (size < targetSize || sampleRate <= 0) return size
+        val searchFrames = max(1, sampleRate * SEARCH_WINDOW_MS / 1_000)
+        val windowFrames = max(1, sampleRate * ENERGY_WINDOW_MS / 1_000)
+        val stepFrames = max(1, sampleRate * ENERGY_STEP_MS / 1_000)
+        val searchStart = max(windowFrames, size - searchFrames)
+        var bestEnd = size
+        var bestRms = Float.MAX_VALUE
+        var end = searchStart
+        while (end <= size) {
+            val start = max(0, end - windowFrames)
+            var energy = 0.0
+            for (index in start until end) {
+                val sample = samples[index].toDouble()
+                energy += sample * sample
+            }
+            val rms = kotlin.math.sqrt(energy / max(1, end - start)).toFloat()
+            if (rms < bestRms) {
+                bestRms = rms
+                bestEnd = end
+            }
+            end += stepFrames
+        }
+        return if (bestRms <= SILENCE_RMS) bestEnd.coerceIn(1, size) else size
+    }
+}
+
 private class MonoChunker(
     private val sampleRate: Int,
     secondsPerChunk: Int,
@@ -294,19 +327,23 @@ private class MonoChunker(
 
     fun add(value: Float) {
         values[size++] = value
-        if (size == targetSize) emit()
+        if (size == targetSize) {
+            emitPrefix(ASRChunkBoundaryPolicy.chooseSplit(values, size, sampleRate, targetSize))
+        }
     }
 
     fun flush() {
-        if (size > 0) emit()
+        if (size > 0) emitPrefix(size)
     }
 
-    private fun emit() {
+    private fun emitPrefix(count: Int) {
+        require(count in 1..size)
         val start = emittedSamples.toFloat() / sampleRate.toFloat()
-        emittedSamples += size
+        emittedSamples += count
         val end = emittedSamples.toFloat() / sampleRate.toFloat()
-        consume(DecodedAudioChunk(values.copyOf(size), sampleRate, start, end))
-        values = FloatArray(targetSize)
-        size = 0
+        consume(DecodedAudioChunk(values.copyOfRange(0, count), sampleRate, start, end))
+        val remaining = size - count
+        if (remaining > 0) values.copyInto(values, destinationOffset = 0, startIndex = count, endIndex = size)
+        size = remaining
     }
 }

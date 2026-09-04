@@ -104,6 +104,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER }
 private enum class Tab { HOME, LIBRARY, SETTINGS }
@@ -121,6 +122,7 @@ fun LingoPlayApp() {
     var audioBlend by rememberSaveable { mutableFloatStateOf(0.60f) }
     var bilingualSubtitles by rememberSaveable { mutableStateOf(true) }
     var selectedMedia by remember { mutableStateOf<LocalMediaItem?>(null) }
+    var preparedAudioFile by remember { mutableStateOf<File?>(null) }
     var mediaState by rememberSaveable { mutableStateOf(MediaPreparationState.IDLE.name) }
     var mediaError by rememberSaveable { mutableStateOf<String?>(null) }
     var asrPhaseName by rememberSaveable { mutableStateOf(ASRPhase.IDLE.name) }
@@ -173,7 +175,6 @@ fun LingoPlayApp() {
                     )
                     if (stageName == Stage.PROCESSING.name && asrPhaseName == ASRPhase.MODEL_MISSING.name) {
                         asrPhaseName = ASRPhase.IDLE.name
-                        mediaState = MediaPreparationState.READY.name
                     }
                 } catch (cancelled: CancellationException) {
                     modelInstallState = ASRModelInstaller.state(context)
@@ -203,6 +204,8 @@ fun LingoPlayApp() {
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        preparedAudioFile?.delete()
+        preparedAudioFile = null
         mediaState = MediaPreparationState.IMPORTING.name
         mediaError = null
         asrPhaseName = ASRPhase.IDLE.name
@@ -244,12 +247,21 @@ fun LingoPlayApp() {
 
     LaunchedEffect(stageName, selectedMedia?.uri, modelInstalled) {
         val media = selectedMedia
-        if (stageName == Stage.PROCESSING.name && media != null && mediaState == MediaPreparationState.READY.name) {
-            mediaState = MediaPreparationState.EXTRACTING_AUDIO.name
+        val reusableAudio = preparedAudioFile?.takeIf(File::isFile)
+        val canProcess = mediaState == MediaPreparationState.READY.name ||
+            (mediaState == MediaPreparationState.AUDIO_READY.name && reusableAudio != null)
+        if (stageName == Stage.PROCESSING.name && media != null && canProcess) {
             mediaError = null
             try {
-                val audioFile = LocalMediaRepository.extractAudio(context, media)
-                mediaState = MediaPreparationState.AUDIO_READY.name
+                val audioFile = if (reusableAudio != null && mediaState == MediaPreparationState.AUDIO_READY.name) {
+                    reusableAudio
+                } else {
+                    mediaState = MediaPreparationState.EXTRACTING_AUDIO.name
+                    LocalMediaRepository.extractAudio(context, media).also { extracted ->
+                        preparedAudioFile = extracted
+                        mediaState = MediaPreparationState.AUDIO_READY.name
+                    }
+                }
                 val model = ASRModelStore.findWhisperModel(context)
                 if (model == null) {
                     asrPhaseName = ASRPhase.MODEL_MISSING.name
@@ -259,6 +271,8 @@ fun LingoPlayApp() {
                     asrPhaseName = ASRPhase.TRANSCRIBING.name
                     asrTranscript = SherpaWhisperSpeechRecognizer.transcribe(context, audioFile, model)
                     asrPhaseName = ASRPhase.COMPLETED.name
+                    preparedAudioFile?.delete()
+                    preparedAudioFile = null
                     val transcript = asrTranscript ?: error("Speech transcript was not retained.")
                     if (BuildConfig.TRANSLATION_API_BASE_URL.isBlank()) {
                         translationPhaseName = TranslationPhase.ENDPOINT_MISSING.name

@@ -45,3 +45,8 @@ All notable changes to LingoPlay are documented here.
 - Android Plus presentation now mirrors the compact premium-icon treatment used by iOS instead of a text-only `PLUS` pill.
 - Speech-model downloads remain explicit user actions; importing or processing media never silently starts a large model download.
 - Current pre-release capabilities remain usable when StoreKit products are unavailable; Plus entitlement is derived only from verified active StoreKit transactions rather than a persisted local unlock boolean.
+- Android Speech AI download now follows 301/302/303/307/308 redirects explicitly while preserving HTTP Range on every hop, so resumable Hugging Face/CDN downloads do not depend on implicit redirect behavior.
+- iOS model Wi-Fi gating now waits for the first `NWPathMonitor` path callback instead of assuming the path is resolved after a fixed 300 ms delay.
+- StoreKit 2 verified purchases now enable the local Plus entitlement before `Transaction.finish()`, then reconcile from `currentEntitlements` after finish.
+- Android ASR chunking now prefers a low-energy quiet boundary within the final 2 seconds of each bounded chunk, reducing word/sentence cuts while retaining a hard-size fallback for continuous speech/music.
+- Android Processing reuses already extracted audio after an explicit model install instead of demuxing the same source video again; the temporary audio is deleted after successful ASR or when a different media item is selected.

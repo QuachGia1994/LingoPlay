@@ -80,6 +80,7 @@ object ASRModelInstaller {
     private const val modelRootPath = "lingoplay/models/sherpa-whisper"
     private const val activePointerName = "active-model.txt"
     private const val safetyMarginBytes = 64L * 1024L * 1024L
+    private const val maxRedirects = 8
 
     fun state(context: Context): ModelInstallState {
         val model = ASRModelStore.findWhisperModel(context) ?: return ModelInstallState.NotInstalled
@@ -168,13 +169,7 @@ object ASRModelInstaller {
             return
         }
 
-        val connection = (URL(spec.url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 30_000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept-Encoding", "identity")
-            if (existing > 0L) setRequestProperty("Range", "bytes=$existing-")
-        }
+        val connection = openDownloadConnection(spec.url, existing)
 
         try {
             val code = connection.responseCode
@@ -206,6 +201,33 @@ object ASRModelInstaller {
         } finally {
             connection.disconnect()
         }
+    }
+
+    internal fun openDownloadConnection(initialUrl: String, existingBytes: Long): HttpURLConnection {
+        var current = URL(initialUrl)
+        repeat(maxRedirects + 1) { hop ->
+            val connection = (current.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 20_000
+                readTimeout = 30_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept-Encoding", "identity")
+                setRequestProperty("User-Agent", "LingoPlay-ModelInstaller/1")
+                if (existingBytes > 0L) setRequestProperty("Range", "bytes=$existingBytes-")
+            }
+            val code = connection.responseCode
+            if (code !in setOf(301, 302, 303, 307, 308)) return connection
+
+            val location = connection.getHeaderField("Location")
+            connection.disconnect()
+            if (location.isNullOrBlank()) {
+                throw IllegalStateException("Speech AI download redirect did not include a Location header.")
+            }
+            if (hop >= maxRedirects) {
+                throw IllegalStateException("Speech AI download exceeded the redirect limit.")
+            }
+            current = URL(current, location)
+        }
+        error("Speech AI download redirect resolution failed.")
     }
 
     private fun ensureStorage(context: Context, remainingBytes: Long) {
