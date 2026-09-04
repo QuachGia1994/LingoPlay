@@ -3,7 +3,11 @@ import Foundation
 @MainActor
 extension AppModel {
     var availableOfflineVoices: [OfflineVoiceOption] {
-        DubbingPreferencePolicy.availableOfflineVoices()
+        let system = DubbingPreferencePolicy.availableOfflineVoices()
+        let neural = NeuralVoiceModelStore().voiceOption().map { [$0] } ?? []
+        return (neural + system).reduce(into: [OfflineVoiceOption]()) { result, voice in
+            if !result.contains(where: { $0.id == voice.id }) { result.append(voice) }
+        }
     }
 
     var availableTargetVoices: [OfflineVoiceOption] {

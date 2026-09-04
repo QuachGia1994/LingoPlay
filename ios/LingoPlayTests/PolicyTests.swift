@@ -116,4 +116,71 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(PlaybackPresentationPolicy.sourceLanguageLabel(document: nil, fallback: "SRC"), "SRC")
         XCTAssertEqual(PlaybackPresentationPolicy.targetLanguageLabel(document: nil, fallback: "JA"), "JA")
     }
+
+    func testNeuralVoiceManifestIsPinnedExactly() {
+        XCTAssertEqual(NeuralVoicePackManifest.sourceRevision, "3d796cc2f2c884b3517c527507e084f7bb245aea")
+        XCTAssertEqual(NeuralVoicePackManifest.archiveBytes, 67_154_040)
+        XCTAssertEqual(NeuralVoicePackManifest.modelBytes, 63_149_198)
+        XCTAssertEqual(
+            NeuralVoicePackManifest.archiveSHA256,
+            "fa1367710767d36ed5cf13b4a449e20c35ffd12791c2e47c2e64142bfa55551a"
+        )
+    }
+
+    func testNeuralVoiceArchiveRejectsTraversalAndLinks() {
+        XCTAssertEqual(
+            NeuralVoiceArchivePolicy.relativePath(
+                for: "vits-piper-vi_VN-vais1000-medium/vi_VN-vais1000-medium.onnx"
+            ),
+            "vi_VN-vais1000-medium.onnx"
+        )
+        XCTAssertNil(
+            NeuralVoiceArchivePolicy.relativePath(
+                for: "vits-piper-vi_VN-vais1000-medium/../escape"
+            )
+        )
+        XCTAssertFalse(
+            NeuralVoiceArchivePolicy.allowsEntry(
+                name: "vits-piper-vi_VN-vais1000-medium/link",
+                isDirectory: false,
+                isRegularFile: false,
+                size: 1
+            )
+        )
+        XCTAssertFalse(
+            NeuralVoiceArchivePolicy.allowsEntry(
+                name: "vits-piper-vi_VN-vais1000-medium/huge",
+                isDirectory: false,
+                isRegularFile: true,
+                size: NeuralVoiceArchivePolicy.maximumEntryBytes + 1
+            )
+        )
+    }
+
+    func testNeuralVoiceRequiresExplicitInstalledSelection() {
+        XCTAssertEqual(
+            TTSRoutingPolicy.route(
+                preferredVoiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
+                neuralVoiceInstalled: true
+            ),
+            .neural
+        )
+        XCTAssertEqual(
+            TTSRoutingPolicy.route(
+                preferredVoiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
+                neuralVoiceInstalled: false
+            ),
+            .system
+        )
+        XCTAssertEqual(
+            TTSRoutingPolicy.route(preferredVoiceIdentifier: nil, neuralVoiceInstalled: true),
+            .system
+        )
+    }
+
+    func testNeuralVoiceThreadCountRemainsBounded() {
+        XCTAssertEqual(NeuralTTSPerformancePolicy.threadCount(availableProcessors: 1), 1)
+        XCTAssertEqual(NeuralTTSPerformancePolicy.threadCount(availableProcessors: 2), 1)
+        XCTAssertEqual(NeuralTTSPerformancePolicy.threadCount(availableProcessors: 8), 2)
+    }
 }

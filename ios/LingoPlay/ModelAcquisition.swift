@@ -176,7 +176,7 @@ private final class NetworkPathOneShot: @unchecked Sendable {
     }
 }
 
-private enum ModelNetworkPolicy {
+enum ModelNetworkPolicy {
     static func isUsingWiFi() async -> Bool {
         let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
         let queue = DispatchQueue(label: "com.lingoplay.model-network-gate")

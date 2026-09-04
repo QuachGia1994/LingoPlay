@@ -35,6 +35,19 @@ class DubbingPreferenceStateTest {
         assertEquals(1.25f, state.playbackSpeed, 0.001f)
     }
 
+    @Test
+    fun removingInstalledVoiceClearsPersistedSelection() {
+        val persistence = FakeDubbingPreferencePersistence()
+        val state = DubbingPreferenceState(persistence)
+
+        state.updateOfflineVoices(listOf(OfflineVoiceOption("vi-a", "Vietnamese A", "vi")))
+        assertEquals("vi-a", state.preferredVoiceId)
+
+        state.updateOfflineVoices(emptyList())
+        assertNull(state.preferredVoiceId)
+        assertNull(persistence.preferredVoiceId)
+    }
+
     private class FakeDubbingPreferencePersistence : DubbingPreferencePersistence {
         override var sourceLanguage = SourceLanguageChoice.AUTO
         override var targetLanguage = TargetLanguageChoice.VIETNAMESE

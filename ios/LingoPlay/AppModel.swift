@@ -76,6 +76,7 @@ final class AppModel {
     var ttsState: TTSState = .idle
     var mixState: MixState = .idle
     var modelInstallState: ASRModelInstallState = .notInstalled
+    var neuralVoiceInstallState: ASRModelInstallState = .notInstalled
     var plusPresented = false
     var aboutPresented = false
     var pendingRecovery: ProcessingRecoveryCheckpoint?
@@ -96,16 +97,18 @@ final class AppModel {
     private let mediaService = LocalMediaService()
     private let asrModelStore = ASRModelStore()
     private let modelInstaller = WhisperModelInstaller()
+    let neuralVoiceInstaller = NeuralVoicePackInstaller()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     private let translationService = TranslationService()
-    private let ttsService = SystemVietnameseTTSService()
+    private let ttsService = OfflineDubbingTTSService()
     private let timelineMixService = TimelineMixService()
     private let libraryStore = LocalLibraryStore()
     private let processingRecoveryStore = ProcessingRecoveryStore()
-    private let diagnostics = LocalDiagnostics()
+    let diagnostics = LocalDiagnostics()
     private var playbackMixContext: PlaybackMixContext?
     private var playbackTimeObserver: Any?
     private var modelInstallTask: Task<Void, Never>?
+    var neuralVoiceInstallTask: Task<Void, Never>?
     private var activeProcessingConfig: ProcessingConfig?
 
     func finishSplash() {
@@ -346,6 +349,7 @@ final class AppModel {
 
     func refreshModelState() async {
         modelInstallState = await modelInstaller.state()
+        neuralVoiceInstallState = await neuralVoiceInstaller.state()
     }
 
     func installSpeechModel() {

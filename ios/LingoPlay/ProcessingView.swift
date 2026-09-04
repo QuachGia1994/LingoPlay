@@ -117,7 +117,7 @@ struct ProcessingView: View {
                                 .font(.caption2.bold())
                                 .foregroundStyle(LPTheme.cyan)
                         }
-                        Text("System voice · \(dub.voiceIdentifier)")
+                        Text("Offline voice · \(dub.voiceIdentifier)")
                             .font(.caption)
                         Text("\(dub.totalTailSilenceMs) ms timeline silence reserved · no spoken words truncated")
                             .font(.caption2)

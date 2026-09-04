@@ -247,7 +247,7 @@ internal fun ProcessingScreen(
                     Spacer(Modifier.weight(1f))
                     Text("${dubSpeech.segments.size} clips", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("Offline system voice · ${dubSpeech.voiceName}", fontSize = 12.sp)
+                Text("Offline voice · ${dubSpeech.voiceName}", fontSize = 12.sp)
                 Text("${dubSpeech.totalTailSilenceMs} ms timeline silence reserved · no spoken words truncated", color = LpSecondaryText, fontSize = 10.sp)
             }
         }

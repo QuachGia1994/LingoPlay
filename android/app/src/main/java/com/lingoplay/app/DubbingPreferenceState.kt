@@ -46,6 +46,10 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
 
     fun updateOfflineVoices(voices: List<OfflineVoiceOption>) {
         offlineVoices = voices
+        if (preferredVoiceId != null && voices.none { it.id == preferredVoiceId }) {
+            preferredVoiceId = null
+            store.preferredVoiceId = null
+        }
     }
 
     fun cycleSourceLanguage() {

@@ -107,10 +107,10 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
         document: TranslationDocument,
         preferredVoiceId: String?,
         onProgress: suspend (Int, Int) -> Unit,
-    ): DubSpeechDocument = SystemVietnameseTTSService.synthesize(
+    ): DubSpeechDocument = OfflineDubbingTTSService.synthesize(
         context = context,
         document = document,
-        preferredVoiceName = preferredVoiceId,
+        preferredVoiceId = preferredVoiceId,
         onProgress = onProgress,
     )
 

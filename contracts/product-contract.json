@@ -26,7 +26,23 @@
     "weeklyProductId": "com.lingoplay.plus.weekly",
     "monthlyProductId": "com.lingoplay.plus.monthly"
   },
+  "offlineNeuralVoice": {
+    "id": "neural:vi-vais1000-medium",
+    "languageCode": "vi",
+    "enabledByDefault": false,
+    "bundledInBaseApp": false,
+    "archiveBytes": 67154040,
+    "archiveSha256": "fa1367710767d36ed5cf13b4a449e20c35ffd12791c2e47c2e64142bfa55551a",
+    "modelBytes": 63149198,
+    "version": "vi-vais1000-medium-fa136771",
+    "sourceRevision": "3d796cc2f2c884b3517c527507e084f7bb245aea",
+    "referenceRepackRevision": "3d92898cf942406c23330da466a831d3d923c2a2",
+    "modelLicense": "MIT",
+    "datasetLicense": "CC-BY-4.0"
+  },
   "capabilities": {
-    "cleanBackgroundVerified": false
+    "cleanBackgroundVerified": false,
+    "neuralVoiceEmotionEnabled": false,
+    "voiceCloningEnabled": false
   }
 }

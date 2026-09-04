@@ -294,9 +294,9 @@ struct PrepareView: View {
                 VStack(spacing: 0) {
                     PrepareSetting(icon: "waveform.badge.mic", title: "From language", value: model.sourceLanguageChoice.label, detail: "Whisper language override", action: model.cycleSourceLanguage)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "character.bubble.fill", title: "To language", value: model.targetLanguageChoice.label, detail: "Translation + offline system voice", action: model.cycleTargetLanguage)
+                    PrepareSetting(icon: "character.bubble.fill", title: "To language", value: model.targetLanguageChoice.label, detail: "Translation + offline voice", action: model.cycleTargetLanguage)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: model.preferredVoiceLabel, detail: "Installed system voice", action: model.cycleVoice)
+                    PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: model.preferredVoiceLabel, detail: "Installed offline voice", action: model.cycleVoice)
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: model.dubbingMode.label, detail: model.dubbingMode.detail, action: model.cycleDubbingMode)
                     Divider().overlay(LPTheme.border)

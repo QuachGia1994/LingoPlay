@@ -122,9 +122,14 @@ internal fun SettingsScreen(
     isPlus: Boolean,
     modelInstallState: ModelInstallState,
     canDeleteModel: Boolean,
+    neuralVoiceInstallState: ModelInstallState,
+    canDeleteNeuralVoice: Boolean,
     onInstallModel: () -> Unit,
     onCancelModel: () -> Unit,
     onDeleteModel: () -> Unit,
+    onInstallNeuralVoice: () -> Unit,
+    onCancelNeuralVoice: () -> Unit,
+    onDeleteNeuralVoice: () -> Unit,
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
@@ -224,6 +229,69 @@ internal fun SettingsScreen(
                     PrimaryAction(language.text("Retry install", "Thử cài lại"), Icons.Rounded.Download, onInstallModel)
                 }
                 ModelInstallState.NotInstalled -> PrimaryAction(language.text("Install Speech AI · ~104 MB", "Cài Speech AI · ~104 MB"), Icons.Rounded.Download, onInstallModel)
+            }
+        }
+
+        LpCard {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = LpViolet, modifier = Modifier.size(21.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(language.text("Vietnamese Neural Voice", "Giọng Neural tiếng Việt"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when (neuralVoiceInstallState) {
+                            is ModelInstallState.Installed -> "VAIS1000 Medium · ${MediaFormatting.bytes(neuralVoiceInstallState.bytes)} · offline"
+                            is ModelInstallState.Downloading -> language.text("Downloading verified voice pack…", "Đang tải gói giọng đã xác minh…")
+                            is ModelInstallState.Failed -> language.text("Install failed", "Cài đặt thất bại")
+                            ModelInstallState.NotInstalled -> language.text("Optional · not installed", "Tùy chọn · chưa cài")
+                        },
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+            when (neuralVoiceInstallState) {
+                is ModelInstallState.Downloading -> {
+                    LinearProgressIndicator(
+                        progress = { neuralVoiceInstallState.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = LpViolet,
+                        trackColor = LpSurfaceStrong,
+                    )
+                    Text(
+                        "${(neuralVoiceInstallState.progress * 100).toInt()}% · ${MediaFormatting.bytes(neuralVoiceInstallState.bytesDone)} / ${MediaFormatting.bytes(neuralVoiceInstallState.bytesTotal)}",
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                    TextButton(onClick = onCancelNeuralVoice) { Text(language.text("Cancel download", "Hủy tải")) }
+                }
+                is ModelInstallState.Installed -> {
+                    Text(
+                        language.text(
+                            "One local 22.05 kHz neural preset. Select it in AI Voice; system voices remain the fallback. Emotion and cloning are unavailable.",
+                            "Một preset neural 22,05 kHz chạy cục bộ. Chọn trong Giọng AI; giọng hệ thống vẫn là fallback. Chưa hỗ trợ cảm xúc và clone giọng.",
+                        ),
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                    TextButton(onClick = onDeleteNeuralVoice, enabled = canDeleteNeuralVoice) {
+                        Text(language.text("Delete voice pack", "Xóa gói giọng"))
+                    }
+                }
+                is ModelInstallState.Failed -> {
+                    Text(neuralVoiceInstallState.message, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                    PrimaryAction(language.text("Retry install", "Thử cài lại"), Icons.Rounded.Download, onInstallNeuralVoice)
+                }
+                ModelInstallState.NotInstalled -> {
+                    Text(
+                        language.text(
+                            "Downloads only the pinned model archive (64 MiB; ~78 MiB installed). Audio synthesis stays on-device. VAIS-1000 dataset: CC BY 4.0.",
+                            "Chỉ tải archive model đã pin (64 MiB; khoảng 78 MiB sau khi cài). Tổng hợp âm thanh luôn ở trên thiết bị. Dataset VAIS-1000: CC BY 4.0.",
+                        ),
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                    PrimaryAction(language.text("Install Neural Voice · 64 MiB", "Cài Giọng Neural · 64 MiB"), Icons.Rounded.Download, onInstallNeuralVoice)
+                }
             }
         }
 

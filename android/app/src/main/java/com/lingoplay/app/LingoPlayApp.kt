@@ -173,6 +173,8 @@ fun LingoPlayApp() {
     var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
     var modelInstallState by remember { mutableStateOf<ModelInstallState>(ASRModelInstaller.state(context)) }
     var modelInstallJob by remember { mutableStateOf<Job?>(null) }
+    var neuralVoiceInstallState by remember { mutableStateOf<ModelInstallState>(NeuralVoicePackInstaller.state(context)) }
+    var neuralVoiceInstallJob by remember { mutableStateOf<Job?>(null) }
     var uiLanguageName by rememberSaveable {
         mutableStateOf(uiPreferences.getString("ui_language", UiLanguage.ENGLISH.name) ?: UiLanguage.ENGLISH.name)
     }
@@ -218,6 +220,53 @@ fun LingoPlayApp() {
             modelInstallJob = null
             ASRModelInstaller.deleteInstalled(context)
             modelInstallState = ModelInstallState.NotInstalled
+        }
+    }
+    val refreshVoiceOptions: suspend () -> Unit = {
+        dubbingState.updateOfflineVoices(OfflineDubbingTTSService.availableVoices(context))
+    }
+    val startNeuralVoiceInstall: () -> Unit = {
+        if (neuralVoiceInstallJob == null) {
+            neuralVoiceInstallJob = scope.launch {
+                try {
+                    NeuralVoicePackInstaller.install(context, wifiOnly) { progress ->
+                        withContext(Dispatchers.Main.immediate) { neuralVoiceInstallState = progress }
+                    }
+                    neuralVoiceInstallState = NeuralVoicePackInstaller.state(context)
+                    refreshVoiceOptions()
+                } catch (cancelled: CancellationException) {
+                    neuralVoiceInstallState = NeuralVoicePackInstaller.state(context)
+                    throw cancelled
+                } catch (error: Throwable) {
+                    neuralVoiceInstallState = ModelInstallState.Failed(
+                        error.message ?: "Neural Voice installation failed.",
+                    )
+                } finally {
+                    neuralVoiceInstallJob = null
+                }
+            }
+        }
+    }
+    val cancelNeuralVoiceInstall: () -> Unit = {
+        neuralVoiceInstallJob?.cancel()
+    }
+    val deleteNeuralVoice: () -> Unit = {
+        if (ttsPhase != TTSPhase.SYNTHESIZING) {
+            neuralVoiceInstallJob?.cancel()
+            neuralVoiceInstallJob = null
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { NeuralVoicePackInstaller.deleteInstalled(context) }
+                    neuralVoiceInstallState = ModelInstallState.NotInstalled
+                    refreshVoiceOptions()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    neuralVoiceInstallState = ModelInstallState.Failed(
+                        error.message ?: "Unable to delete the installed Neural Voice pack.",
+                    )
+                }
+            }
         }
     }
 
@@ -275,9 +324,7 @@ fun LingoPlayApp() {
         plusStore.start()
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
-        dubbingState.updateOfflineVoices(
-            runCatching { SystemVietnameseTTSService.availableOfflineVoices(context) }.getOrDefault(emptyList()),
-        )
+        refreshVoiceOptions()
         if (pendingRecovery != null) LocalDiagnostics.record(context, "recovery_available")
         if (stageName == Stage.SPLASH.name) {
             delay(900)
@@ -624,9 +671,14 @@ fun LingoPlayApp() {
                             isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
                             canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
+                            neuralVoiceInstallState = neuralVoiceInstallState,
+                            canDeleteNeuralVoice = ttsPhase != TTSPhase.SYNTHESIZING,
                             onInstallModel = startModelInstall,
                             onCancelModel = cancelModelInstall,
                             onDeleteModel = deleteModel,
+                            onInstallNeuralVoice = startNeuralVoiceInstall,
+                            onCancelNeuralVoice = cancelNeuralVoiceInstall,
+                            onDeleteNeuralVoice = deleteNeuralVoice,
                             onToggleAppearance = {
                                 highContrast = !highContrast
                                 uiPreferences.edit { putBoolean("high_contrast", highContrast) }

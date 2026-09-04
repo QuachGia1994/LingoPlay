@@ -15,6 +15,12 @@ ANDROID_PLUS = (ROOT / "android/app/src/main/java/com/lingoplay/app/AndroidPlusS
 IOS_PLUS = (ROOT / "ios/LingoPlay/PlusStore.swift").read_text(encoding="utf-8")
 ANDROID_SEPARATION = (ROOT / "android/app/src/main/java/com/lingoplay/app/SourceSeparation.kt").read_text(encoding="utf-8")
 IOS_SEPARATION = (ROOT / "ios/LingoPlay/SourceSeparation.swift").read_text(encoding="utf-8")
+ANDROID_NEURAL_ACQUISITION = (ROOT / "android/app/src/main/java/com/lingoplay/app/NeuralVoiceAcquisition.kt").read_text(encoding="utf-8")
+ANDROID_NEURAL_RUNTIME = (ROOT / "android/app/src/main/java/com/lingoplay/app/NeuralTextToSpeech.kt").read_text(encoding="utf-8")
+ANDROID_SETTINGS = (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPlaySettingsScreens.kt").read_text(encoding="utf-8")
+IOS_NEURAL_ACQUISITION = (ROOT / "ios/LingoPlay/NeuralVoiceAcquisition.swift").read_text(encoding="utf-8")
+IOS_NEURAL_RUNTIME = (ROOT / "ios/LingoPlay/NeuralTextToSpeech.swift").read_text(encoding="utf-8")
+IOS_SETTINGS = (ROOT / "ios/LingoPlay/LibrarySettingsViews.swift").read_text(encoding="utf-8")
 
 
 def require(condition: bool, label: str) -> None:
@@ -99,5 +105,34 @@ require(f'monthlyID = "{monthly}"' in IOS_PLUS, "iOS monthly Plus ID")
 require(CONTRACT["capabilities"]["cleanBackgroundVerified"] is False, "contract Clean Background remains unverified")
 require("val engine: SourceSeparationEngine = UnavailableSourceSeparationEngine" in ANDROID_SEPARATION, "Android Clean Background unavailable engine")
 require("UnavailableSourceSeparationEngine()" in IOS_SEPARATION, "iOS Clean Background unavailable engine")
+
+neural = CONTRACT["offlineNeuralVoice"]
+require(neural["languageCode"] == "vi", "contract neural voice remains Vietnamese-only")
+require(neural["enabledByDefault"] is False, "contract neural voice requires explicit selection")
+require(neural["bundledInBaseApp"] is False, "contract neural pack stays outside base app")
+for name, source in (
+    ("Android", ANDROID_NEURAL_ACQUISITION),
+    ("iOS", IOS_NEURAL_ACQUISITION),
+):
+    require(neural["id"] in source, f"{name} neural voice ID matches contract")
+    require(f'{neural["archiveBytes"]:_}' in source, f"{name} neural archive size matches contract")
+    require(neural["archiveSha256"] in source, f"{name} neural archive hash matches contract")
+    require(f'{neural["modelBytes"]:_}' in source, f"{name} neural model size matches archive evidence")
+    require(neural["version"] in source, f"{name} neural version follows archive digest")
+    require(neural["sourceRevision"] in source, f"{name} neural source revision matches contract")
+require(
+    "preferredVoiceId == NeuralVoicePackManifest.voiceId && neuralVoiceInstalled" in ANDROID_NEURAL_RUNTIME,
+    "Android neural route requires explicit installed selection",
+)
+require(
+    "preferredVoiceIdentifier == NeuralVoicePackManifest.voiceIdentifier && neuralVoiceInstalled" in IOS_NEURAL_RUNTIME,
+    "iOS neural route requires explicit installed selection",
+)
+require(neural["modelLicense"] == "MIT", "contract records original Piper voice license")
+require(neural["datasetLicense"] == "CC-BY-4.0", "contract records VAIS-1000 corpus license")
+require(CONTRACT["capabilities"]["neuralVoiceEmotionEnabled"] is False, "contract neural emotion remains disabled")
+require(CONTRACT["capabilities"]["voiceCloningEnabled"] is False, "contract voice cloning remains disabled")
+require("Emotion and cloning are unavailable" in ANDROID_SETTINGS, "Android discloses emotion/cloning unavailable")
+require("emotion and voice cloning are not enabled" in IOS_SETTINGS, "iOS discloses emotion/cloning unavailable")
 
 print("Product contract verification PASSED")

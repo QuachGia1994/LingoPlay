@@ -246,7 +246,7 @@ internal fun PrepareScreen(
             CardDivider()
             PrepareRow(Icons.Rounded.Language, "To language", targetLanguage.label, "Translation + offline TTS target", onTargetLanguage)
             CardDivider()
-            PrepareRow(Icons.Rounded.Person, "AI Voice", voiceLabel, "Installed offline system voice", onVoice)
+            PrepareRow(Icons.Rounded.Person, "AI Voice", voiceLabel, "Installed offline voice", onVoice)
             CardDivider()
             PrepareRow(Icons.Rounded.Tune, "Dubbing mode", dubbingMode.label, dubbingMode.detail, onDubbingMode)
             CardDivider()

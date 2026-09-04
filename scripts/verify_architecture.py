@@ -75,6 +75,7 @@ require("DubbingPreferencePolicy.availableOfflineVoices()" not in ios_model, "iO
 prefs_extension = ROOT / "ios/LingoPlay/AppModel+Preferences.swift"
 playback_extension = ROOT / "ios/LingoPlay/AppModel+PlaybackPresentation.swift"
 require(prefs_extension.is_file(), "iOS preferences extension exists")
+require((ROOT / "ios/LingoPlay/AppModel+NeuralVoice.swift").is_file(), "iOS neural lifecycle extension exists")
 require(playback_extension.is_file(), "iOS playback presentation extension exists")
 require((ROOT / "ios/LingoPlay/PlaybackPresentationPolicy.swift").is_file(), "iOS playback presentation policy exists")
 require((ROOT / "android/app/src/main/java/com/lingoplay/app/PlayerInteractionPolicy.kt").is_file(), "Android player interaction policy exists")
@@ -154,5 +155,80 @@ wrangler_spec = (ROOT / "backend/wrangler.jsonc").read_text(encoding="utf-8")
 require('"binding": "AI"' in wrangler_spec, "Cloudflare Worker keeps Workers AI binding")
 backend_source = (ROOT / "backend/src/index.ts").read_text(encoding="utf-8")
 require('@cf/meta/m2m100-1.2b' in backend_source, "backend translation uses pinned Workers AI model")
+
+neural_sources = {
+    "Android acquisition": ROOT / "android/app/src/main/java/com/lingoplay/app/NeuralVoiceAcquisition.kt",
+    "Android runtime": ROOT / "android/app/src/main/java/com/lingoplay/app/NeuralTextToSpeech.kt",
+    "Android policy tests": ROOT / "android/app/src/test/java/com/lingoplay/app/NeuralVoicePolicyTest.kt",
+    "iOS acquisition": ROOT / "ios/LingoPlay/NeuralVoiceAcquisition.swift",
+    "iOS runtime": ROOT / "ios/LingoPlay/NeuralTextToSpeech.swift",
+}
+for name, path in neural_sources.items():
+    require(path.is_file(), f"{name} exists")
+    require(path.stat().st_size <= 32_000, f"{name} remains focused")
+
+android_neural_acquisition = neural_sources["Android acquisition"].read_text(encoding="utf-8")
+android_neural_runtime = neural_sources["Android runtime"].read_text(encoding="utf-8")
+ios_neural_acquisition = neural_sources["iOS acquisition"].read_text(encoding="utf-8")
+ios_neural_runtime = neural_sources["iOS runtime"].read_text(encoding="utf-8")
+neural_pins = (
+    "3d796cc2f2c884b3517c527507e084f7bb245aea",
+    "fa1367710767d36ed5cf13b4a449e20c35ffd12791c2e47c2e64142bfa55551a",
+    "67_154_040",
+    "63_149_198",
+    "vi-vais1000-medium-fa136771",
+)
+for pin in neural_pins:
+    require(pin in android_neural_acquisition, f"Android neural manifest pins {pin}")
+    require(pin in ios_neural_acquisition, f"iOS neural manifest pins {pin}")
+for name, source in (
+    ("Android", android_neural_acquisition),
+    ("iOS", ios_neural_acquisition),
+):
+    require("active-model.txt" in source, f"{name} neural voice uses versioned activation")
+    require("maximumEntries" in source or "maxEntries" in source, f"{name} neural archive caps entries")
+    require("maximumUncompressedBytes" in source or "maxUncompressedBytes" in source, f"{name} neural archive caps expansion")
+require("downloadResumable" in android_neural_acquisition, "Android neural download preserves resumable partial file")
+require(
+    "currentCoroutineContext().ensureActive()" in android_neural_acquisition,
+    "Android neural extraction observes cancellation",
+)
+require(
+    "Task.checkCancellation()" in ios_neural_acquisition,
+    "iOS neural extraction observes cancellation",
+)
+require(
+    "URLSessionDataDelegate" in ios_neural_acquisition
+    and "prepareDestinationForStreaming" in ios_neural_acquisition
+    and "Content-Range" in ios_neural_acquisition
+    and "willPerformHTTPRedirection" in ios_neural_acquisition,
+    "iOS neural download streams into a validated resumable partial file",
+)
+for name, source in (("Android", android_neural_runtime), ("iOS", ios_neural_runtime)):
+    require("TTSRoutingPolicy" in source, f"{name} neural voice routing policy exists")
+    require("SYSTEM" in source or ".system" in source, f"{name} keeps system voice fallback")
+    require("threadCount" in source, f"{name} bounds neural CPU threads")
+
+require(
+    'implementation("org.apache.commons:commons-compress:1.28.0")' in android_build_spec,
+    "Android pins Commons Compress 1.28.0",
+)
+require("sherpa-onnx-1.13.7.aar" in android_build_spec, "Android pins sherpa-onnx 1.13.7")
+require("exactVersion: 1.13.7" in project_spec, "iOS pins SherpaOnnx 1.13.7")
+require("exactVersion: 4.9.1" in project_spec, "iOS pins SWCompression 4.9.1")
+require("product: sherpa-onnx" in project_spec, "iOS links sherpa-onnx product")
+require("product: SWCompression" in project_spec, "iOS links SWCompression product")
+require((ROOT / "THIRD_PARTY_NOTICES.md").is_file(), "neural voice attribution exists")
+require(
+    (ROOT / "docs/research/mobile-neural-tts.md").is_file(),
+    "neural TTS upstream decision record exists",
+)
+bundled_voice_models = [
+    path
+    for source_root in (ROOT / "android/app/src", ROOT / "ios/LingoPlay")
+    for pattern in ("*.onnx", "*.tar.bz2")
+    for path in source_root.rglob(pattern)
+]
+require(not bundled_voice_models, "optional neural voice pack is not bundled in app source")
 
 print("Architecture verification PASSED")

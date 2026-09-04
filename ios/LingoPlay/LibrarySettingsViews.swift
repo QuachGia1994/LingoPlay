@@ -135,6 +135,8 @@ struct SettingsView: View {
 
                 SpeechModelManagementCard(model: model)
 
+                NeuralVoiceManagementCard(model: model)
+
                 VStack(spacing: 0) {
                     Button {
                         model.plusPresented = true
@@ -199,7 +201,7 @@ struct PlusView: View {
                         Label(model.uiText("Planned Plus capabilities", "Tính năng Plus dự kiến"), systemImage: "sparkles")
                             .font(.headline)
                             .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Installed system-voice selection and PiP are live. Clean Background/source separation remains disabled until a verified native engine is integrated.", "Chọn giọng hệ thống đã cài và PiP đã hoạt động. Clean Background/tách nguồn vẫn tắt cho đến khi có engine native được xác minh."))
+                        Text(model.uiText("Installed offline-voice selection and PiP are live. Clean Background/source separation remains disabled until a verified native engine is integrated.", "Chọn giọng offline đã cài và PiP đã hoạt động. Clean Background/tách nguồn vẫn tắt cho đến khi có engine native được xác minh."))
                             .font(.subheadline)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -386,6 +388,95 @@ struct SpeechModelManagementCard: View {
             model.uiText("Downloading Whisper Tiny…", "Đang tải Whisper Tiny…")
         case .installed(let bytes):
             "Whisper Tiny · \(MediaFormatting.bytes(bytes)) · offline"
+        case .failed:
+            model.uiText("Install failed", "Cài đặt thất bại")
+        }
+    }
+}
+
+struct NeuralVoiceManagementCard: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "waveform.badge.plus")
+                    .foregroundStyle(LPTheme.cyan)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.uiText("Vietnamese Neural Voice", "Giọng Neural tiếng Việt"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(LPTheme.secondaryText)
+                }
+                Spacer()
+            }
+
+            switch model.neuralVoiceInstallState {
+            case .notInstalled:
+                Text(model.uiText(
+                    "Optional 64 MiB download (~78 MiB installed). It runs fully on-device after an explicit install. One Vietnamese 22.05 kHz preset is included; emotion and voice cloning are not enabled.",
+                    "Gói tải tùy chọn 64 MiB (khoảng 78 MiB sau khi cài). Sau khi bạn chủ động cài, giọng chạy hoàn toàn trên thiết bị. Hiện có một giọng tiếng Việt 22,05 kHz; chưa bật cảm xúc và nhân bản giọng."
+                ))
+                    .font(.caption)
+                    .foregroundStyle(LPTheme.secondaryText)
+                LPPrimaryButton(
+                    title: model.uiText("Install Neural Voice", "Cài giọng Neural"),
+                    systemImage: "arrow.down.circle.fill"
+                ) {
+                    model.installNeuralVoice()
+                }
+            case .downloading(let progress):
+                ProgressView(value: progress)
+                    .tint(LPTheme.cyan)
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(LPTheme.secondaryText)
+                Button(model.uiText("Cancel download", "Hủy tải")) {
+                    model.cancelNeuralVoiceInstall()
+                }
+                .buttonStyle(.bordered)
+            case .installed(let bytes):
+                Text(model.uiText(
+                    "Installed locally · \(MediaFormatting.bytes(bytes)). Select “Vietnamese Neural · VAIS1000” under AI Voice to use it. System offline voice remains the safe fallback.",
+                    "Đã cài cục bộ · \(MediaFormatting.bytes(bytes)). Chọn “Vietnamese Neural · VAIS1000” trong Giọng AI để dùng. Giọng hệ thống offline vẫn là phương án dự phòng an toàn."
+                ))
+                    .font(.caption)
+                    .foregroundStyle(LPTheme.secondaryText)
+                Button(role: .destructive) {
+                    model.deleteNeuralVoice()
+                } label: {
+                    Label(model.uiText("Delete Neural Voice", "Xóa giọng Neural"), systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canDeleteNeuralVoice)
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                LPPrimaryButton(
+                    title: model.uiText("Retry install", "Thử cài lại"),
+                    systemImage: "arrow.clockwise"
+                ) {
+                    model.installNeuralVoice()
+                }
+            }
+
+            Text("VAIS-1000 · CC BY 4.0 · sherpa-onnx 1.13.7")
+                .font(.caption2.monospaced())
+                .foregroundStyle(LPTheme.secondaryText)
+        }
+        .lpCard()
+    }
+
+    private var statusText: String {
+        switch model.neuralVoiceInstallState {
+        case .notInstalled:
+            model.uiText("Not installed", "Chưa cài")
+        case .downloading:
+            model.uiText("Downloading verified voice pack…", "Đang tải gói giọng đã xác minh…")
+        case .installed:
+            model.uiText("Installed · offline", "Đã cài · offline")
         case .failed:
             model.uiText("Install failed", "Cài đặt thất bại")
         }

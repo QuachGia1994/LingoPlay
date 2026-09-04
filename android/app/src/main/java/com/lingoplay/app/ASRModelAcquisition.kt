@@ -158,7 +158,7 @@ object ASRModelInstaller {
         return File(root, version).takeIf(File::isDirectory)
     }
 
-    private suspend fun downloadResumable(
+    internal suspend fun downloadResumable(
         spec: ModelFileSpec,
         partFile: File,
         onProgress: suspend (Long) -> Unit,
@@ -237,7 +237,7 @@ object ASRModelInstaller {
         }
     }
 
-    private fun isOnWifi(context: Context): Boolean {
+    internal fun isOnWifi(context: Context): Boolean {
         val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = manager.activeNetwork ?: return false
         val capabilities = manager.getNetworkCapabilities(network) ?: return false

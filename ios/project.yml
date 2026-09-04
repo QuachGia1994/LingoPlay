@@ -7,6 +7,12 @@ packages:
   ArgmaxOSS:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
     from: 1.1.0
+  SherpaOnnx:
+    url: https://github.com/k2-fsa/sherpa-onnx.git
+    exactVersion: 1.13.7
+  SWCompression:
+    url: https://github.com/tsolomko/SWCompression.git
+    exactVersion: 4.9.1
 targets:
   LingoPlay:
     type: application
@@ -21,6 +27,10 @@ targets:
     dependencies:
       - package: ArgmaxOSS
         product: WhisperKit
+      - package: SherpaOnnx
+        product: sherpa-onnx
+      - package: SWCompression
+        product: SWCompression
     scheme:
       storeKitConfiguration: Products.storekit
       testTargets:
