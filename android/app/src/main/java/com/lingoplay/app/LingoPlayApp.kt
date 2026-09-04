@@ -111,7 +111,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER }
+private enum class Stage { SPLASH, HOME, PREPARE, PROCESSING, PLAYER, PLUS, ABOUT }
 private enum class Tab { HOME, LIBRARY, SETTINGS }
 private enum class UiLanguage { ENGLISH, VIETNAMESE }
 
@@ -124,8 +124,6 @@ private val accentBrush = Brush.horizontalGradient(listOf(LpViolet, LpBlue, LpCy
 fun LingoPlayApp() {
     var stageName by rememberSaveable { mutableStateOf(Stage.SPLASH.name) }
     var tabName by rememberSaveable { mutableStateOf(Tab.HOME.name) }
-    var audioBlend by rememberSaveable { mutableFloatStateOf(0.60f) }
-    var bilingualSubtitles by rememberSaveable { mutableStateOf(true) }
     var selectedMedia by remember { mutableStateOf<LocalMediaItem?>(null) }
     var preparedAudioFile by remember { mutableStateOf<File?>(null) }
     var mediaState by rememberSaveable { mutableStateOf(MediaPreparationState.IDLE.name) }
@@ -153,6 +151,56 @@ fun LingoPlayApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val processingGate = remember { ProcessingRunGate() }
+    val dubbingPreferences = remember(context) { DubbingPreferencesStore(context) }
+    val plusStore = remember(context) { AndroidPlusStore(context.applicationContext) }
+    var sourceLanguageName by rememberSaveable { mutableStateOf(dubbingPreferences.sourceLanguage.name) }
+    var targetLanguageName by rememberSaveable { mutableStateOf(dubbingPreferences.targetLanguage.name) }
+    var dubbingModeName by rememberSaveable { mutableStateOf(dubbingPreferences.dubbingMode.name) }
+    var subtitleModeName by rememberSaveable { mutableStateOf(dubbingPreferences.subtitleMode.name) }
+    var playbackSpeed by rememberSaveable { mutableFloatStateOf(dubbingPreferences.playbackSpeed) }
+    var preferredVoiceId by rememberSaveable { mutableStateOf(dubbingPreferences.preferredVoiceId) }
+    var offlineVoices by remember { mutableStateOf<List<OfflineVoiceOption>>(emptyList()) }
+    val sourceLanguage = runCatching { SourceLanguageChoice.valueOf(sourceLanguageName) }.getOrDefault(SourceLanguageChoice.AUTO)
+    val targetLanguage = runCatching { TargetLanguageChoice.valueOf(targetLanguageName) }.getOrDefault(TargetLanguageChoice.VIETNAMESE)
+    val dubbingMode = runCatching { DubbingModePreset.valueOf(dubbingModeName) }.getOrDefault(DubbingModePreset.BALANCED)
+    val subtitleMode = runCatching { SubtitleMode.valueOf(subtitleModeName) }.getOrDefault(SubtitleMode.BILINGUAL)
+    val availableTargetCodes = offlineVoices.map { it.languageCode.substringBefore('-') }.toSet()
+    val targetVoices = offlineVoices.filter { it.languageCode.substringBefore('-') == targetLanguage.code.substringBefore('-') }
+    val preferredVoiceLabel = targetVoices.firstOrNull { it.id == preferredVoiceId }?.label ?: "Automatic"
+    val cycleSourceLanguage: () -> Unit = {
+        val next = sourceLanguage.next()
+        sourceLanguageName = next.name
+        dubbingPreferences.sourceLanguage = next
+    }
+    val cycleTargetLanguage: () -> Unit = {
+        val next = targetLanguage.next(availableTargetCodes)
+        targetLanguageName = next.name
+        dubbingPreferences.targetLanguage = next
+        preferredVoiceId = null
+        dubbingPreferences.preferredVoiceId = null
+    }
+    val cycleDubbingMode: () -> Unit = {
+        val next = dubbingMode.next()
+        dubbingModeName = next.name
+        dubbingPreferences.dubbingMode = next
+    }
+    val cycleSubtitleMode: () -> Unit = {
+        val next = subtitleMode.next()
+        subtitleModeName = next.name
+        dubbingPreferences.subtitleMode = next
+    }
+    val cycleVoice: () -> Unit = {
+        val ids = listOf<String?>(null) + targetVoices.map(OfflineVoiceOption::id)
+        val currentIndex = ids.indexOf(preferredVoiceId).takeIf { it >= 0 } ?: 0
+        val next = ids[(currentIndex + 1) % ids.size]
+        preferredVoiceId = next
+        dubbingPreferences.preferredVoiceId = next
+    }
+    val cyclePlaybackSpeed: () -> Unit = {
+        val next = DubbingPreferencePolicy.nextPlaybackSpeed(playbackSpeed)
+        playbackSpeed = next
+        dubbingPreferences.playbackSpeed = next
+    }
     val uiPreferences = remember(context) { context.getSharedPreferences("lingoplay_ui", Context.MODE_PRIVATE) }
     var wifiOnly by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("wifi_only", true)) }
     var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
@@ -254,6 +302,7 @@ fun LingoPlayApp() {
     LaunchedEffect(Unit) {
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
+        offlineVoices = runCatching { SystemVietnameseTTSService.availableOfflineVoices(context) }.getOrDefault(emptyList())
         if (pendingRecovery != null) LocalDiagnostics.record(context, "recovery_available")
         if (stageName == Stage.SPLASH.name) {
             delay(900)
@@ -287,7 +336,12 @@ fun LingoPlayApp() {
                     asrPhaseName = ASRPhase.LOADING_MODEL.name
                     asrError = null
                     asrPhaseName = ASRPhase.TRANSCRIBING.name
-                    asrTranscript = SherpaWhisperSpeechRecognizer.transcribe(context, audioFile, model)
+                    asrTranscript = SherpaWhisperSpeechRecognizer.transcribe(
+                        context = context,
+                        audioFile = audioFile,
+                        model = model,
+                        sourceLanguageCode = sourceLanguage.code,
+                    )
                     asrPhaseName = ASRPhase.COMPLETED.name
                     val transcript = asrTranscript ?: error("Speech transcript was not retained.")
                     if (BuildConfig.TRANSLATION_API_BASE_URL.isBlank()) {
@@ -295,7 +349,10 @@ fun LingoPlayApp() {
                     } else {
                         translationPhaseName = TranslationPhase.TRANSLATING.name
                         translationError = null
-                        translationDocument = TranslationService.translate(transcript) { batch, total ->
+                        translationDocument = TranslationService.translate(
+                            transcript = transcript,
+                            targetLanguage = targetLanguage.code,
+                        ) { batch, total ->
                             withContext(Dispatchers.Main.immediate) {
                                 translationBatch = batch
                                 translationBatchTotal = total
@@ -306,7 +363,11 @@ fun LingoPlayApp() {
                         try {
                             ttsPhaseName = TTSPhase.SYNTHESIZING.name
                             ttsError = null
-                            dubSpeechDocument = SystemVietnameseTTSService.synthesize(context, translated) { segment, total ->
+                            dubSpeechDocument = SystemVietnameseTTSService.synthesize(
+                                context = context,
+                                document = translated,
+                                preferredVoiceName = preferredVoiceId,
+                            ) { segment, total ->
                                 withContext(Dispatchers.Main.immediate) {
                                     ttsSegment = segment
                                     ttsSegmentTotal = total
@@ -316,7 +377,12 @@ fun LingoPlayApp() {
                             val dub = dubSpeechDocument ?: error("Vietnamese speech document was not retained.")
                             try {
                                 mixError = null
-                                val rendered = TimelineMixService.render(context, media, dub) { phase ->
+                                val rendered = TimelineMixService.render(
+                                    context = context,
+                                    media = media,
+                                    dub = dub,
+                                    mode = dubbingMode,
+                                ) { phase ->
                                     withContext(Dispatchers.Main.immediate) {
                                         mixPhaseName = phase.name
                                     }
@@ -342,7 +408,7 @@ fun LingoPlayApp() {
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
-                        } catch (_: OfflineVietnameseVoiceMissingException) {
+                        } catch (_: OfflineTargetVoiceMissingException) {
                             LocalDiagnostics.record(context, "tts_voice_missing")
                             ttsPhaseName = TTSPhase.VOICE_MISSING.name
                         } catch (error: Throwable) {
@@ -405,6 +471,17 @@ fun LingoPlayApp() {
 
                     Stage.PREPARE -> PrepareScreen(
                         media = selectedMedia,
+                        sourceLanguage = sourceLanguage,
+                        targetLanguage = targetLanguage,
+                        voiceLabel = preferredVoiceLabel,
+                        dubbingMode = dubbingMode,
+                        subtitleMode = subtitleMode,
+                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
+                        onSourceLanguage = cycleSourceLanguage,
+                        onTargetLanguage = cycleTargetLanguage,
+                        onVoice = cycleVoice,
+                        onDubbingMode = cycleDubbingMode,
+                        onSubtitleMode = cycleSubtitleMode,
                         onBack = {
                             preparedAudioFile?.delete()
                             preparedAudioFile = null
@@ -459,8 +536,11 @@ fun LingoPlayApp() {
                         media = selectedMedia,
                         processed = mixResult,
                         translation = translationDocument,
-                        audioBlend = audioBlend,
-                        onAudioBlendChange = { audioBlend = it },
+                        subtitleMode = subtitleMode,
+                        dubbingMode = dubbingMode,
+                        playbackSpeed = playbackSpeed,
+                        onSubtitleMode = cycleSubtitleMode,
+                        onPlaybackSpeed = cyclePlaybackSpeed,
                         onEnterPip = {
                             val activity = context as? Activity
                             if (activity != null && processedSupportsPip(mixResult)) {
@@ -471,8 +551,8 @@ fun LingoPlayApp() {
                                 )
                             }
                         },
-                        onShare = {
-                            activeLibraryItem?.let { item ->
+                        onShare = activeLibraryItem?.let { item ->
+                            {
                                 context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
                             }
                         },
@@ -484,6 +564,7 @@ fun LingoPlayApp() {
                             language = uiLanguage,
                             items = libraryItems,
                             recovery = pendingRecovery,
+                            onPlus = { stageName = Stage.PLUS.name },
                             onImport = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                             onResumeRecovery = { checkpoint ->
                                 LocalDiagnostics.record(context, "recovery_resumed")
@@ -542,7 +623,10 @@ fun LingoPlayApp() {
                             language = uiLanguage,
                             highContrast = highContrast,
                             wifiOnly = wifiOnly,
-                            bilingualSubtitles = bilingualSubtitles,
+                            subtitleMode = subtitleMode,
+                            targetLanguage = targetLanguage,
+                            voiceLabel = preferredVoiceLabel,
+                            isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
                             canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
                             onInstallModel = startModelInstall,
@@ -561,9 +645,26 @@ fun LingoPlayApp() {
                                 wifiOnly = it
                                 uiPreferences.edit { putBoolean("wifi_only", it) }
                             },
-                            onBilingualSubtitlesChange = { bilingualSubtitles = it },
+                            onSubtitleMode = cycleSubtitleMode,
+                            onTargetLanguage = cycleTargetLanguage,
+                            onVoice = cycleVoice,
+                            onPlus = { stageName = Stage.PLUS.name },
+                            onAbout = { stageName = Stage.ABOUT.name },
                         )
                     }
+
+                    Stage.PLUS -> PlusScreen(
+                        language = uiLanguage,
+                        store = plusStore,
+                        onBack = { stageName = Stage.HOME.name },
+                    )
+
+                    Stage.ABOUT -> AboutScreen(
+                        language = uiLanguage,
+                        diagnosticsCount = LocalDiagnostics.recent(context).size,
+                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
+                        onBack = { stageName = Stage.HOME.name },
+                    )
                 }
             }
 
@@ -605,6 +706,7 @@ private fun HomeScreen(
     language: UiLanguage,
     items: List<LocalLibraryItem>,
     recovery: ProcessingCheckpoint?,
+    onPlus: () -> Unit,
     onImport: () -> Unit,
     onResumeRecovery: (ProcessingCheckpoint) -> Unit,
     onDiscardRecovery: () -> Unit,
@@ -617,7 +719,7 @@ private fun HomeScreen(
                 Text(language.text("Understand without borders", "Hiểu mọi nội dung, không rào cản"), color = LpSecondaryText, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
-            Surface(color = LpSurface, shape = CircleShape) {
+            Surface(modifier = Modifier.clickable(onClick = onPlus), color = LpSurface, shape = CircleShape) {
                 Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.WorkspacePremium, contentDescription = "LingoPlay Plus", tint = LpViolet, modifier = Modifier.size(21.dp))
                 }
@@ -677,7 +779,23 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun PrepareScreen(media: LocalMediaItem?, onBack: () -> Unit, onEdit: () -> Unit, onTranslate: () -> Unit) {
+private fun PrepareScreen(
+    media: LocalMediaItem?,
+    sourceLanguage: SourceLanguageChoice,
+    targetLanguage: TargetLanguageChoice,
+    voiceLabel: String,
+    dubbingMode: DubbingModePreset,
+    subtitleMode: SubtitleMode,
+    cleanBackgroundAvailable: Boolean,
+    onSourceLanguage: () -> Unit,
+    onTargetLanguage: () -> Unit,
+    onVoice: () -> Unit,
+    onDubbingMode: () -> Unit,
+    onSubtitleMode: () -> Unit,
+    onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onTranslate: () -> Unit,
+) {
     ScreenScroll {
         ScreenHeader("Prepare", onBack)
         LpCard {
@@ -695,17 +813,22 @@ private fun PrepareScreen(media: LocalMediaItem?, onBack: () -> Unit, onEdit: ()
         }
 
         LpCard {
-            PrepareRow(Icons.Rounded.Mic, "From language", "Auto Detect", "Detected locally from speech")
+            PrepareRow(Icons.Rounded.Mic, "From language", sourceLanguage.label, "Whisper language override", onSourceLanguage)
             CardDivider()
-            PrepareRow(Icons.Rounded.Language, "To language", "Vietnamese", "Tiếng Việt")
+            PrepareRow(Icons.Rounded.Language, "To language", targetLanguage.label, "Translation + offline TTS target", onTargetLanguage)
             CardDivider()
-            PrepareRow(Icons.Rounded.Person, "AI Voice", "Nam · Natural", "Warm, clear Vietnamese voice")
+            PrepareRow(Icons.Rounded.Person, "AI Voice", voiceLabel, "Installed offline system voice", onVoice)
             CardDivider()
-            PrepareRow(Icons.Rounded.Tune, "Dubbing mode", "Balanced", "Normalized voice + adaptive soundtrack ducking")
+            PrepareRow(Icons.Rounded.Tune, "Dubbing mode", dubbingMode.label, dubbingMode.detail, onDubbingMode)
             CardDivider()
-            PrepareRow(Icons.Rounded.AutoAwesome, "Clean Background", "Unavailable", "Source-separation engine is not bundled yet")
+            PrepareRow(
+                Icons.Rounded.AutoAwesome,
+                "Clean Background",
+                if (cleanBackgroundAvailable) "Ready" else "Unavailable",
+                if (cleanBackgroundAvailable) "Verified source-separation engine installed" else "No verified source-separation engine is bundled yet",
+            )
             CardDivider()
-            PrepareRow(Icons.Rounded.Subtitles, "Subtitles", "Bilingual", "Original + translated")
+            PrepareRow(Icons.Rounded.Subtitles, "Subtitles", subtitleMode.label, "Player subtitle display mode", onSubtitleMode)
         }
 
         PrimaryAction("Translate & Dub", Icons.Rounded.AutoAwesome, onTranslate)
@@ -773,7 +896,7 @@ private fun ProcessingScreen(
             CardDivider()
             ProcessingRow("Translating", translationProcessState(translationPhase))
             CardDivider()
-            ProcessingRow("Creating Vietnamese voice", ttsProcessState(ttsPhase))
+            ProcessingRow("Creating offline voice", ttsProcessState(ttsPhase))
             CardDivider()
             ProcessingRow("Mixing audio", mixProcessState(mixPhase))
         }
@@ -793,7 +916,7 @@ private fun ProcessingScreen(
         if (translation != null && translationPhase == TranslationPhase.COMPLETED) {
             LpCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Vietnamese translation", fontWeight = FontWeight.Bold)
+                    Text("Translation", fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
                     Text("${translation.segments.size} segments", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
@@ -845,7 +968,7 @@ private fun ProcessingScreen(
         if (dubSpeech != null && ttsPhase == TTSPhase.COMPLETED) {
             LpCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Vietnamese voice ready", fontWeight = FontWeight.Bold)
+                    Text("Offline voice ready", fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
                     Text("${dubSpeech.segments.size} clips", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
@@ -856,7 +979,7 @@ private fun ProcessingScreen(
 
         if (ttsPhase == TTSPhase.VOICE_MISSING) {
             LpCard {
-                Text("No offline Vietnamese system voice is installed. LingoPlay will not use a network-required TTS voice for this local dubbing path.", color = LpSecondaryText, fontSize = 12.sp)
+                Text("No offline system voice is installed for the selected target language. LingoPlay will not use a network-required TTS voice for this local dubbing path.", color = LpSecondaryText, fontSize = 12.sp)
             }
         }
 
@@ -868,7 +991,7 @@ private fun ProcessingScreen(
                     Text("LOCAL", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 Text("Video stream was remuxed without video transcoding.", fontSize = 12.sp)
-                Text("Original audio and Vietnamese dub remain separate for live blend control.", color = LpSecondaryText, fontSize = 10.sp)
+                Text("Original audio and generated speech were mixed locally using the selected dubbing mode.", color = LpSecondaryText, fontSize = 10.sp)
             }
         }
 
@@ -906,17 +1029,17 @@ private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhas
         ASRPhase.COMPLETED -> when (translationPhase) {
             TranslationPhase.TRANSLATING -> "Translating transcript"
             TranslationPhase.COMPLETED -> when (ttsPhase) {
-                TTSPhase.SYNTHESIZING -> "Creating Vietnamese voice on-device"
+                TTSPhase.SYNTHESIZING -> "Creating offline voice on-device"
                 TTSPhase.COMPLETED -> when (mixPhase) {
                     MixPhase.RENDERING_AUDIO -> "Building local dub timeline"
                     MixPhase.REMUXING -> "Remuxing dubbed video"
                     MixPhase.COMPLETED -> "Dubbed video ready"
                     MixPhase.FAILED -> "Local mix or remux stopped"
-                    MixPhase.IDLE -> "Vietnamese voice ready"
+                    MixPhase.IDLE -> "Offline voice ready"
                 }
                 TTSPhase.VOICE_MISSING -> "Translation ready · offline voice not installed"
-                TTSPhase.FAILED -> "Vietnamese voice synthesis stopped"
-                TTSPhase.IDLE -> "Vietnamese translation ready"
+                TTSPhase.FAILED -> "Offline voice synthesis stopped"
+                TTSPhase.IDLE -> "Translation ready"
             }
             TranslationPhase.ENDPOINT_MISSING -> "Speech ready · translation not configured"
             TranslationPhase.FAILED -> "Translation stopped"
@@ -972,10 +1095,13 @@ private fun PlayerScreen(
     media: LocalMediaItem?,
     processed: LocalDubMediaResult?,
     translation: TranslationDocument?,
-    audioBlend: Float,
-    onAudioBlendChange: (Float) -> Unit,
+    subtitleMode: SubtitleMode,
+    dubbingMode: DubbingModePreset,
+    playbackSpeed: Float,
+    onSubtitleMode: () -> Unit,
+    onPlaybackSpeed: () -> Unit,
     onEnterPip: () -> Unit,
-    onShare: () -> Unit,
+    onShare: (() -> Unit)?,
     onBack: () -> Unit,
 ) {
     var pipAvailable by remember(processed?.remuxedVideoFile?.absolutePath) { mutableStateOf(false) }
@@ -995,6 +1121,8 @@ private fun PlayerScreen(
             SingleClockDubPlayer(
                 processed = processed,
                 translation = translation,
+                subtitleMode = subtitleMode,
+                playbackSpeed = playbackSpeed,
                 onPipAvailabilityChange = { pipAvailable = it },
             )
         } else {
@@ -1011,33 +1139,27 @@ private fun PlayerScreen(
 
         LpCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Audio blend", fontWeight = FontWeight.Bold)
+                Text("Final audio mix", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text("Balanced export", color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(dubbingMode.label, color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            Slider(
-                value = audioBlend,
-                onValueChange = onAudioBlendChange,
-                valueRange = 0f..1f,
-                enabled = false,
-            )
-            Row {
-                Text("Original", color = LpSecondaryText, fontSize = 12.sp)
-                Spacer(Modifier.weight(1f))
-                Text("Dub", color = LpSecondaryText, fontSize = 12.sp)
-            }
+            Text(dubbingMode.detail, color = LpSecondaryText, fontSize = 12.sp)
             Text(
-                "Android playback uses one mixed audio track to avoid dual-player clock drift. Live blend is disabled until it can run inside one audio graph.",
+                "Android export contains one final mixed audio track. A fake live blend control is intentionally not shown.",
                 color = LpSecondaryText,
                 fontSize = 10.sp,
             )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlayerAction(Icons.Rounded.ClosedCaption, "Subtitles", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.Tune, "Mixed", Modifier.weight(1f))
-            PlayerAction(Icons.Rounded.PictureInPictureAlt, "PiP", Modifier.weight(1f), if (processed != null && pipAvailable) onEnterPip else null)
-            PlayerAction(Icons.Rounded.Share, "Share", Modifier.weight(1f), onShare)
+            PlayerAction(Icons.Rounded.ClosedCaption, subtitleMode.label, Modifier.weight(1f), onSubtitleMode)
+            PlayerAction(Icons.Rounded.Speed, String.format("%.2gx", playbackSpeed), Modifier.weight(1f), onPlaybackSpeed)
+            if (processed != null && pipAvailable) {
+                PlayerAction(Icons.Rounded.PictureInPictureAlt, "PiP", Modifier.weight(1f), onEnterPip)
+            }
+            if (onShare != null) {
+                PlayerAction(Icons.Rounded.Share, "Share", Modifier.weight(1f), onShare)
+            }
         }
     }
 }
@@ -1049,12 +1171,21 @@ private fun processedSupportsPip(processed: LocalDubMediaResult?): Boolean =
 private fun SingleClockDubPlayer(
     processed: LocalDubMediaResult,
     translation: TranslationDocument?,
+    subtitleMode: SubtitleMode,
+    playbackSpeed: Float,
     onPipAvailabilityChange: (Boolean) -> Unit,
 ) {
     var videoView by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf<VideoView?>(null) }
+    var mediaPlayer by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var videoReady by remember(processed.remuxedVideoFile.absolutePath) { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentMs by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(playbackSpeed, mediaPlayer) {
+        mediaPlayer?.let { player ->
+            runCatching { player.playbackParams = player.playbackParams.setSpeed(playbackSpeed) }
+        }
+    }
 
     LaunchedEffect(isPlaying, videoView) {
         onPipAvailabilityChange(videoReady && isPlaying)
@@ -1067,6 +1198,7 @@ private fun SingleClockDubPlayer(
     DisposableEffect(videoView) {
         onDispose {
             onPipAvailabilityChange(false)
+            mediaPlayer = null
             videoView?.pause()
             videoView?.stopPlayback()
         }
@@ -1084,8 +1216,10 @@ private fun SingleClockDubPlayer(
             factory = { ctx ->
                 VideoView(ctx).apply {
                     setVideoPath(processed.remuxedVideoFile.absolutePath)
-                    setOnPreparedListener {
+                    setOnPreparedListener { player ->
+                        mediaPlayer = player
                         videoReady = true
+                        runCatching { player.playbackParams = player.playbackParams.setSpeed(playbackSpeed) }
                         onPipAvailabilityChange(false)
                     }
                     setOnCompletionListener {
@@ -1167,10 +1301,16 @@ private fun SingleClockDubPlayer(
     }
 
     val activeSegment = translation?.segments?.lastOrNull { currentMs >= it.startMs && currentMs < it.endMs }
-    LpCard {
-        SubtitleRow("SRC", activeSegment?.sourceText ?: "—")
-        CardDivider()
-        SubtitleRow("VI", activeSegment?.translatedText ?: "—")
+    when (subtitleMode) {
+        SubtitleMode.OFF -> Unit
+        SubtitleMode.TRANSLATED -> LpCard {
+            SubtitleRow(translation?.targetLanguage?.uppercase() ?: "TR", activeSegment?.translatedText ?: "—")
+        }
+        SubtitleMode.BILINGUAL -> LpCard {
+            SubtitleRow(translation?.sourceLanguage?.uppercase() ?: "SRC", activeSegment?.sourceText ?: "—")
+            CardDivider()
+            SubtitleRow(translation?.targetLanguage?.uppercase() ?: "TR", activeSegment?.translatedText ?: "—")
+        }
     }
 }
 
@@ -1221,7 +1361,10 @@ private fun SettingsScreen(
     language: UiLanguage,
     highContrast: Boolean,
     wifiOnly: Boolean,
-    bilingualSubtitles: Boolean,
+    subtitleMode: SubtitleMode,
+    targetLanguage: TargetLanguageChoice,
+    voiceLabel: String,
+    isPlus: Boolean,
     modelInstallState: ModelInstallState,
     canDeleteModel: Boolean,
     onInstallModel: () -> Unit,
@@ -1230,7 +1373,11 @@ private fun SettingsScreen(
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
-    onBilingualSubtitlesChange: (Boolean) -> Unit,
+    onSubtitleMode: () -> Unit,
+    onTargetLanguage: () -> Unit,
+    onVoice: () -> Unit,
+    onPlus: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     ScreenScroll {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1256,13 +1403,13 @@ private fun SettingsScreen(
                 onToggleLanguage,
             )
             CardDivider()
-            SettingsValueRow(Icons.Rounded.Person, language.text("AI Voice", "Giọng AI"), "Nam · Natural")
+            SettingsValueRow(Icons.Rounded.Person, language.text("AI Voice", "Giọng AI"), voiceLabel, onVoice)
             CardDivider()
-            SettingsValueRow(Icons.Rounded.Language, language.text("Dubbing Language", "Ngôn ngữ lồng tiếng"), language.text("Vietnamese", "Tiếng Việt"))
+            SettingsValueRow(Icons.Rounded.Language, language.text("Dubbing Language", "Ngôn ngữ lồng tiếng"), targetLanguage.label, onTargetLanguage)
             CardDivider()
             ToggleRow(Icons.Rounded.Wifi, language.text("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), wifiOnly, onWifiOnlyChange)
             CardDivider()
-            ToggleRow(Icons.Rounded.Subtitles, language.text("Bilingual subtitles", "Phụ đề song ngữ"), bilingualSubtitles, onBilingualSubtitlesChange)
+            SettingsValueRow(Icons.Rounded.Subtitles, language.text("Subtitles", "Phụ đề"), subtitleMode.label, onSubtitleMode)
         }
 
         LpCard {
@@ -1326,7 +1473,96 @@ private fun SettingsScreen(
         }
 
         LpCard {
-            SettingsValueRow(Icons.Rounded.Info, language.text("About LingoPlay", "Giới thiệu LingoPlay"), "Foundation")
+            SettingsValueRow(
+                Icons.Rounded.WorkspacePremium,
+                "LingoPlay Plus",
+                if (isPlus) language.text("Active", "Đang hoạt động") else language.text("Explore", "Xem gói"),
+                onPlus,
+            )
+            CardDivider()
+            SettingsValueRow(Icons.Rounded.Info, language.text("About LingoPlay", "Giới thiệu LingoPlay"), BuildConfig.VERSION_NAME, onAbout)
+        }
+    }
+}
+
+@Composable
+private fun PlusScreen(language: UiLanguage, store: AndroidPlusStore, onBack: () -> Unit) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { store.start() }
+    ScreenScroll {
+        ScreenHeader("LingoPlay Plus", onBack)
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.WorkspacePremium, contentDescription = null, tint = LpViolet, modifier = Modifier.size(52.dp))
+        }
+        LpCard {
+            Text(
+                if (store.isPlus) language.text("Plus is active", "Plus đang hoạt động") else language.text("Plus subscriptions", "Gói đăng ký Plus"),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                language.text(
+                    "Google Play Billing 9.1 is wired for weekly/monthly subscriptions. Pending purchases never unlock Plus.",
+                    "Google Play Billing 9.1 đã được nối cho gói tuần/tháng. Giao dịch đang chờ không mở khóa Plus.",
+                ),
+                color = LpSecondaryText,
+                fontSize = 12.sp,
+            )
+            store.message?.let { Text(it, color = LpSecondaryText, fontSize = 11.sp) }
+        }
+        store.products.forEach { product ->
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(product.title, fontWeight = FontWeight.Bold)
+                        Text(product.productId, color = LpSecondaryText, fontSize = 10.sp)
+                    }
+                    Text(product.price, color = LpCyan, fontWeight = FontWeight.Bold)
+                }
+                PrimaryAction(language.text("Subscribe", "Đăng ký"), Icons.Rounded.WorkspacePremium) {
+                    (context as? Activity)?.let { store.purchase(it, product) }
+                }
+            }
+        }
+        if (store.products.isEmpty() && !store.isPlus) {
+            LpCard {
+                Text(language.text("Products unavailable", "Chưa có sản phẩm"), fontWeight = FontWeight.Bold)
+                Text(
+                    store.message ?: language.text(
+                        "This build/account has no matching Play Console subscription products yet.",
+                        "Build/tài khoản này chưa có subscription tương ứng trên Play Console.",
+                    ),
+                    color = LpSecondaryText,
+                    fontSize = 12.sp,
+                )
+                PrimaryAction(language.text("Retry", "Thử lại"), Icons.Rounded.Download) { store.refresh() }
+            }
+        }
+        TextButton(onClick = { store.restore() }) {
+            Text(language.text("Restore purchases", "Khôi phục giao dịch"))
+        }
+    }
+}
+
+@Composable
+private fun AboutScreen(
+    language: UiLanguage,
+    diagnosticsCount: Int,
+    cleanBackgroundAvailable: Boolean,
+    onBack: () -> Unit,
+) {
+    ScreenScroll {
+        ScreenHeader(language.text("About LingoPlay", "Giới thiệu LingoPlay"), onBack)
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { BrandMark(size = 86.dp) }
+        LpCard {
+            Text("LingoPlay ${BuildConfig.VERSION_NAME}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(language.text("Private local-media dubbing", "Lồng tiếng media cục bộ riêng tư"), color = LpSecondaryText)
+            CardDivider()
+            Text(language.text("Media boundary", "Biên media"), fontWeight = FontWeight.Bold)
+            Text(language.text("Video/audio stay on-device; only transcript JSON is eligible for translation requests.", "Video/audio luôn trên thiết bị; chỉ transcript JSON có thể được gửi để dịch."), color = LpSecondaryText, fontSize = 12.sp)
+            CardDivider()
+            Text("Clean Background: ${if (cleanBackgroundAvailable) "Ready" else "Unavailable"}", fontSize = 12.sp)
+            Text(language.text("Local diagnostic events: $diagnosticsCount", "Sự kiện chẩn đoán cục bộ: $diagnosticsCount"), fontSize = 12.sp)
         }
     }
 }
@@ -1508,15 +1744,22 @@ private fun SectionHeader(title: String, trailing: String) {
 }
 
 @Composable
-private fun PrepareRow(icon: ImageVector, title: String, value: String, detail: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun PrepareRow(
+    icon: ImageVector,
+    title: String,
+    value: String,
+    detail: String,
+    action: (() -> Unit)? = null,
+) {
+    val modifier = if (action != null) Modifier.fillMaxWidth().clickable(onClick = action) else Modifier.fillMaxWidth()
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(icon, contentDescription = null, tint = LpCyan, modifier = Modifier.size(22.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = LpSecondaryText, fontSize = 10.sp)
             Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(detail, color = LpSecondaryText, fontSize = 10.sp)
         }
-        Text("›", color = LpSecondaryText, fontSize = 22.sp)
+        if (action != null) Text("›", color = LpSecondaryText, fontSize = 22.sp)
     }
 }
 
@@ -1581,7 +1824,7 @@ private fun SettingsValueRow(icon: ImageVector, title: String, value: String, ac
         Icon(icon, contentDescription = null, tint = LpCyan, modifier = Modifier.size(21.dp))
         Text(title, modifier = Modifier.weight(1f), fontSize = 13.sp)
         Text(value, color = LpSecondaryText, fontSize = 11.sp)
-        Text("›", color = LpSecondaryText, fontSize = 20.sp)
+        if (action != null) Text("›", color = LpSecondaryText, fontSize = 20.sp)
     }
 }
 

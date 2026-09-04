@@ -292,17 +292,22 @@ struct PrepareView: View {
                 .lpCard()
 
                 VStack(spacing: 0) {
-                    PrepareSetting(icon: "waveform.badge.mic", title: "From language", value: "Auto Detect", detail: "Detected locally from speech")
+                    PrepareSetting(icon: "waveform.badge.mic", title: "From language", value: model.sourceLanguageChoice.label, detail: "Whisper language override", action: model.cycleSourceLanguage)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "character.bubble.fill", title: "To language", value: "Vietnamese", detail: "Tiếng Việt")
+                    PrepareSetting(icon: "character.bubble.fill", title: "To language", value: model.targetLanguageChoice.label, detail: "Translation + offline system voice", action: model.cycleTargetLanguage)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: "Nam · Natural", detail: "Warm, clear Vietnamese voice")
+                    PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: model.preferredVoiceLabel, detail: "Installed system voice", action: model.cycleVoice)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: "Balanced", detail: "Adaptive soundtrack ducking + smoother transitions")
+                    PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: model.dubbingMode.label, detail: model.dubbingMode.detail, action: model.cycleDubbingMode)
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "waveform.path.ecg", title: "Clean Background", value: "Unavailable", detail: "Source-separation engine is not bundled yet")
+                    PrepareSetting(
+                        icon: "waveform.path.ecg",
+                        title: "Clean Background",
+                        value: CleanBackgroundCapability.isAvailable ? "Ready" : "Unavailable",
+                        detail: CleanBackgroundCapability.isAvailable ? "Verified source-separation engine ready" : "No verified source-separation engine is bundled yet"
+                    )
                     Divider().overlay(LPTheme.border)
-                    PrepareSetting(icon: "captions.bubble.fill", title: "Subtitles", value: "Bilingual", detail: "Original + translated")
+                    PrepareSetting(icon: "captions.bubble.fill", title: "Subtitles", value: model.subtitleMode.label, detail: "Player subtitle display mode", action: model.cycleSubtitleMode)
                 }
                 .lpCard()
 
@@ -348,8 +353,12 @@ private struct PrepareSetting: View {
     let title: String
     let value: String
     let detail: String
+    var action: (() -> Void)? = nil
 
     var body: some View {
+        Button {
+            action?()
+        } label: {
         HStack(spacing: 13) {
             Image(systemName: icon)
                 .frame(width: 28)
@@ -365,11 +374,16 @@ private struct PrepareSetting: View {
                     .foregroundStyle(LPTheme.secondaryText)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.bold())
-                .foregroundStyle(LPTheme.secondaryText)
+            if action != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(LPTheme.secondaryText)
+            }
         }
         .padding(.vertical, 11)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
     }
 }
 
@@ -404,7 +418,7 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Translating", state: translationStageState)
                     Divider().overlay(LPTheme.border)
-                    ProcessingStageRow(title: "Creating Vietnamese voice", state: ttsStageState)
+                    ProcessingStageRow(title: "Creating offline voice", state: ttsStageState)
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Mixing audio", state: mixingStageState)
                 }
@@ -434,7 +448,7 @@ struct ProcessingView: View {
                 if case .completed(let translation) = model.translationState {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Label("Vietnamese translation", systemImage: "character.bubble.fill")
+                            Label("Translation", systemImage: "character.bubble.fill")
                                 .font(.headline)
                                 .foregroundStyle(LPTheme.accent)
                             Spacer()
@@ -471,7 +485,7 @@ struct ProcessingView: View {
                 if case .completed(let dub) = model.ttsState {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Label("Vietnamese voice ready", systemImage: "waveform.circle.fill")
+                            Label("Offline voice ready", systemImage: "waveform.circle.fill")
                                 .font(.headline)
                                 .foregroundStyle(LPTheme.accent)
                             Spacer()
@@ -489,7 +503,7 @@ struct ProcessingView: View {
                 }
 
                 if case .voiceMissing = model.ttsState {
-                    Text("No Vietnamese system voice is installed. Install a Vietnamese voice in iOS speech settings before local dubbing.")
+                    Text("No system voice is installed for the selected target language. Install a matching voice in iOS speech settings before local dubbing.")
                         .font(.caption)
                         .foregroundStyle(LPTheme.secondaryText)
                         .lpCard()
@@ -508,7 +522,7 @@ struct ProcessingView: View {
                         }
                         Text("Video was remuxed without video transcoding.")
                             .font(.caption)
-                        Text("Original audio and Vietnamese dub remain separate for live blend control.")
+                        Text("Original audio and generated speech remain in one local playback graph for live blend control.")
                             .font(.caption2)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -570,18 +584,18 @@ struct ProcessingView: View {
                 case .translating: return "Translating transcript"
                 case .completed:
                     switch model.ttsState {
-                    case .synthesizing: return "Creating Vietnamese voice on-device"
+                    case .synthesizing: return "Creating offline voice on-device"
                     case .completed:
                         switch model.mixState {
                         case .renderingAudio: return "Building local dub timeline"
                         case .remuxing: return "Remuxing dubbed video"
                         case .completed: return "Dubbed video ready"
                         case .failed: return "Local mix or remux stopped"
-                        case .idle: return "Vietnamese voice ready"
+                        case .idle: return "Offline voice ready"
                         }
-                    case .voiceMissing: return "Translation ready · Vietnamese voice not installed"
-                    case .failed: return "Vietnamese voice synthesis stopped"
-                    case .idle: return "Vietnamese translation ready"
+                    case .voiceMissing: return "Translation ready · offline voice not installed"
+                    case .failed: return "Offline voice synthesis stopped"
+                    case .idle: return "Translation ready"
                     }
                 case .endpointMissing: return "Speech ready · translation not configured"
                 case .failed: return "Translation stopped"
@@ -747,12 +761,22 @@ struct PlayerView: View {
                         .foregroundStyle(LPTheme.secondaryText)
                     }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        SubtitleLine(language: "SRC", text: model.activeTranslationSegment?.sourceText ?? "—")
-                        Divider().overlay(LPTheme.border)
-                        SubtitleLine(language: "VI", text: model.activeTranslationSegment?.translatedText ?? "—")
+                    switch model.subtitleMode {
+                    case .off:
+                        EmptyView()
+                    case .translated:
+                        VStack(alignment: .leading, spacing: 12) {
+                            SubtitleLine(language: model.targetLanguageChoice.code.uppercased(), text: model.activeTranslationSegment?.translatedText ?? "—")
+                        }
+                        .lpCard()
+                    case .bilingual:
+                        VStack(alignment: .leading, spacing: 12) {
+                            SubtitleLine(language: model.sourceLanguageChoice.code?.uppercased() ?? "SRC", text: model.activeTranslationSegment?.sourceText ?? "—")
+                            Divider().overlay(LPTheme.border)
+                            SubtitleLine(language: model.targetLanguageChoice.code.uppercased(), text: model.activeTranslationSegment?.translatedText ?? "—")
+                        }
+                        .lpCard()
                     }
-                    .lpCard()
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -778,16 +802,19 @@ struct PlayerView: View {
                 .lpCard()
 
                 HStack(spacing: 8) {
-                    PlayerAction(icon: "captions.bubble.fill", label: "Subtitles")
-                    PlayerAction(icon: "waveform", label: "Blend")
-                    PlayerAction(icon: "speedometer", label: String(format: "%.1fx", model.playbackSpeed))
+                    Button(action: model.cycleSubtitleMode) {
+                        PlayerAction(icon: "captions.bubble.fill", label: model.subtitleMode.label)
+                    }
+                    .buttonStyle(.plain)
+                    Button(action: model.cyclePlaybackSpeed) {
+                        PlayerAction(icon: "speedometer", label: String(format: "%.2gx", model.playbackSpeed))
+                    }
+                    .buttonStyle(.plain)
                     if let url = model.activeLibraryURL {
                         ShareLink(item: url) {
                             PlayerAction(icon: "square.and.arrow.up", label: "Share")
                         }
                         .buttonStyle(.plain)
-                    } else {
-                        PlayerAction(icon: "arrow.down.circle.fill", label: "Offline")
                     }
                 }
 
@@ -978,19 +1005,25 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
-                    SettingsValueRow(icon: "person.wave.2.fill", title: model.uiText("AI Voice", "Giọng AI"), value: "Nam · Natural")
+                    Button(action: model.cycleVoice) {
+                        SettingsValueRow(icon: "person.wave.2.fill", title: model.uiText("AI Voice", "Giọng AI"), value: model.preferredVoiceLabel)
+                    }
+                    .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
-                    SettingsValueRow(icon: "character.bubble.fill", title: model.uiText("Dubbing Language", "Ngôn ngữ lồng tiếng"), value: model.uiText("Vietnamese", "Tiếng Việt"))
+                    Button(action: model.cycleTargetLanguage) {
+                        SettingsValueRow(icon: "character.bubble.fill", title: model.uiText("Dubbing Language", "Ngôn ngữ lồng tiếng"), value: model.targetLanguageChoice.label)
+                    }
+                    .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.wifiOnly) {
                         Label(model.uiText("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), systemImage: "wifi")
                     }
                     .padding(.vertical, 14)
                     Divider().overlay(LPTheme.border)
-                    Toggle(isOn: $model.bilingualSubtitles) {
-                        Label(model.uiText("Bilingual subtitles", "Phụ đề song ngữ"), systemImage: "captions.bubble.fill")
+                    Button(action: model.cycleSubtitleMode) {
+                        SettingsValueRow(icon: "captions.bubble.fill", title: model.uiText("Subtitles", "Phụ đề"), value: model.subtitleMode.label)
                     }
-                    .padding(.vertical, 14)
+                    .buttonStyle(.plain)
                 }
                 .lpCard()
 
@@ -1018,7 +1051,16 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
-                    SettingsValueRow(icon: "info.circle.fill", title: model.uiText("About LingoPlay", "Giới thiệu LingoPlay"), value: "Foundation")
+                    Button {
+                        model.aboutPresented = true
+                    } label: {
+                        SettingsValueRow(
+                            icon: "info.circle.fill",
+                            title: model.uiText("About LingoPlay", "Giới thiệu LingoPlay"),
+                            value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .lpCard()
             }
@@ -1061,7 +1103,7 @@ struct PlusView: View {
                         Label(model.uiText("Planned Plus capabilities", "Tính năng Plus dự kiến"), systemImage: "sparkles")
                             .font(.headline)
                             .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Natural voices · clean dub/source separation · background & PiP playback · smarter audio controls · future offline model management upgrades.", "Giọng tự nhiên · clean dub/tách nguồn · phát nền & PiP · điều khiển audio nâng cao · nâng cấp quản lý model offline trong tương lai."))
+                        Text(model.uiText("Installed system-voice selection and PiP are live. Clean Background/source separation remains disabled until a verified native engine is integrated.", "Chọn giọng hệ thống đã cài và PiP đã hoạt động. Clean Background/tách nguồn vẫn tắt cho đến khi có engine native được xác minh."))
                             .font(.subheadline)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -1135,6 +1177,49 @@ struct PlusView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+struct AboutView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var diagnosticsCount = 0
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    LPBrandMark()
+                    Text("LingoPlay")
+                        .font(.largeTitle.bold())
+                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(LPTheme.secondaryText)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
+                            .font(.headline)
+                            .foregroundStyle(LPTheme.accent)
+                        Text(model.uiText("Video/audio stay on-device. Only transcript JSON is eligible for translation requests.", "Video/audio luôn ở trên thiết bị. Chỉ transcript JSON có thể được gửi để dịch."))
+                            .font(.subheadline)
+                            .foregroundStyle(LPTheme.secondaryText)
+                        Divider().overlay(LPTheme.border)
+                        Text("Clean Background: \(CleanBackgroundCapability.isAvailable ? "Ready" : "Unavailable")")
+                            .font(.caption)
+                        Text(model.uiText("Local diagnostic events: \(diagnosticsCount)", "Sự kiện chẩn đoán cục bộ: \(diagnosticsCount)"))
+                            .font(.caption)
+                    }
+                    .lpCard()
+                }
+                .padding(18)
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(model.uiText("Done", "Xong")) { dismiss() }
+                }
+            }
+        }
+        .task { diagnosticsCount = await model.localDiagnosticsCount() }
     }
 }
 

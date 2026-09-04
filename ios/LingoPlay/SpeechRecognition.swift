@@ -69,11 +69,11 @@ struct ASRModelStore {
 }
 
 protocol OnDeviceSpeechRecognizer: Sendable {
-    func transcribe(audioURL: URL, model: InstalledWhisperModel) async throws -> ASRTranscript
+    func transcribe(audioURL: URL, model: InstalledWhisperModel, sourceLanguageCode: String?) async throws -> ASRTranscript
 }
 
 actor WhisperKitSpeechRecognizer: OnDeviceSpeechRecognizer {
-    func transcribe(audioURL: URL, model: InstalledWhisperModel) async throws -> ASRTranscript {
+    func transcribe(audioURL: URL, model: InstalledWhisperModel, sourceLanguageCode: String? = nil) async throws -> ASRTranscript {
         let pipe = try await WhisperKit(
             modelFolder: model.modelFolder.path,
             tokenizerFolder: model.tokenizerFolder,
@@ -82,9 +82,14 @@ actor WhisperKitSpeechRecognizer: OnDeviceSpeechRecognizer {
             load: true,
             download: false
         )
+        var decodeOptions = DecodingOptions(verbose: false)
+        decodeOptions.language = sourceLanguageCode
+        decodeOptions.detectLanguage = sourceLanguageCode == nil
+        decodeOptions.usePrefillPrompt = true
         let results = try await pipe.transcribe(
             audioPath: audioURL.path,
-            audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental)
+            audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
+            decodeOptions: decodeOptions
         )
         let segments = results.flatMap(\.segments).enumerated().map { index, segment in
             ASRSegment(

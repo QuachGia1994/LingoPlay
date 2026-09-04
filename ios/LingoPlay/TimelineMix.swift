@@ -12,11 +12,13 @@ final class PlaybackMixContext {
     let originalTrack: AVCompositionTrack
     let dubTrack: AVCompositionTrack
     let speechSegments: [DubSpeechSegment]
+    let mode: DubbingModePreset
 
-    init(originalTrack: AVCompositionTrack, dubTrack: AVCompositionTrack, speechSegments: [DubSpeechSegment]) {
+    init(originalTrack: AVCompositionTrack, dubTrack: AVCompositionTrack, speechSegments: [DubSpeechSegment], mode: DubbingModePreset) {
         self.originalTrack = originalTrack
         self.dubTrack = dubTrack
         self.speechSegments = speechSegments
+        self.mode = mode
     }
 }
 
@@ -73,8 +75,6 @@ enum TimelineMixError: LocalizedError {
 
 @MainActor
 final class TimelineMixService {
-    private let duckFloor: Float = 0.16
-    private let duckFadeSeconds = 0.12
     private let cacheMaxAge: TimeInterval = 24 * 60 * 60
     private let cacheMaxBytes: Int64 = 2 * 1024 * 1024 * 1024
     private let cacheTargetBytes: Int64 = 1536 * 1024 * 1024
@@ -82,6 +82,7 @@ final class TimelineMixService {
     func render(
         media: LocalMediaItem,
         dub: DubSpeechDocument,
+        mode: DubbingModePreset = .balanced,
         progress: @MainActor @Sendable (MixState) -> Void
     ) async throws -> LocalDubMediaResult {
         guard !dub.segments.isEmpty else { throw TimelineMixError.noSpeechClips }
@@ -111,6 +112,7 @@ final class TimelineMixService {
             sourceVideoURL: media.localURL,
             dubbedAudioURL: dubbedAudioURL,
             speechSegments: dub.segments,
+            mode: mode,
             destination: mixedAudioURL
         )
 
@@ -139,7 +141,8 @@ final class TimelineMixService {
         media: LocalMediaItem,
         dubbedAudioURL: URL,
         speechSegments: [DubSpeechSegment],
-        blend: Double
+        blend: Double,
+        mode: DubbingModePreset = .balanced
     ) async throws -> PlaybackSession {
         let source = AVURLAsset(url: media.localURL)
         guard let sourceVideoTrack = try await source.loadTracks(withMediaType: .video).first else {
@@ -196,7 +199,8 @@ final class TimelineMixService {
         let context = PlaybackMixContext(
             originalTrack: outputOriginalTrack,
             dubTrack: outputDubTrack,
-            speechSegments: speechSegments
+            speechSegments: speechSegments,
+            mode: mode
         )
         let item = AVPlayerItem(asset: composition)
         item.audioMix = makePlaybackAudioMix(context: context, blend: blend)
@@ -211,7 +215,9 @@ final class TimelineMixService {
             speechSegments: context.speechSegments,
             originalBaseVolume: 1,
             dubVolume: safeBlend,
-            duckStrength: safeBlend
+            duckStrength: safeBlend,
+            duckFloor: context.mode.duckFloor,
+            duckFadeSeconds: context.mode.duckFadeSeconds
         )
     }
 
@@ -282,6 +288,7 @@ final class TimelineMixService {
         sourceVideoURL: URL,
         dubbedAudioURL: URL,
         speechSegments: [DubSpeechSegment],
+        mode: DubbingModePreset,
         destination: URL
     ) async throws {
         let source = AVURLAsset(url: sourceVideoURL)
@@ -331,8 +338,10 @@ final class TimelineMixService {
             dubTrack: outputDubTrack,
             speechSegments: speechSegments,
             originalBaseVolume: 1,
-            dubVolume: 0.92,
-            duckStrength: 1
+            dubVolume: mode.dubVolume,
+            duckStrength: 1,
+            duckFloor: mode.duckFloor,
+            duckFadeSeconds: mode.duckFadeSeconds
         )
         try await export(exporter, to: destination, as: .m4a)
     }
@@ -343,7 +352,9 @@ final class TimelineMixService {
         speechSegments: [DubSpeechSegment],
         originalBaseVolume: Float,
         dubVolume: Float,
-        duckStrength: Float
+        duckStrength: Float,
+        duckFloor: Float,
+        duckFadeSeconds: TimeInterval
     ) -> AVAudioMix {
         let mix = AVMutableAudioMix()
         let original = AVMutableAudioMixInputParameters(track: originalTrack)
@@ -353,7 +364,9 @@ final class TimelineMixService {
             to: original,
             speechSegments: speechSegments,
             baseVolume: originalBaseVolume,
-            strength: duckStrength
+            strength: duckStrength,
+            duckFloor: duckFloor,
+            duckFadeSeconds: duckFadeSeconds
         )
         dub.setVolume(dubVolume, at: .zero)
         mix.inputParameters = [original, dub]
@@ -364,12 +377,14 @@ final class TimelineMixService {
         to parameters: AVMutableAudioMixInputParameters,
         speechSegments: [DubSpeechSegment],
         baseVolume: Float,
-        strength: Float
+        strength: Float,
+        duckFloor: Float,
+        duckFadeSeconds: TimeInterval
     ) {
         let safeStrength = min(max(strength, 0), 1)
         let duckMultiplier = 1 - safeStrength * (1 - duckFloor)
         let duckVolume = baseVolume * duckMultiplier
-        for interval in mergedSpeechIntervals(speechSegments) {
+        for interval in mergedSpeechIntervals(speechSegments, duckFadeSeconds: duckFadeSeconds) {
             let fadeOutStart = max(0, interval.start - duckFadeSeconds)
             if interval.start > fadeOutStart {
                 parameters.setVolumeRamp(
@@ -400,7 +415,7 @@ final class TimelineMixService {
         var end: TimeInterval
     }
 
-    private func mergedSpeechIntervals(_ segments: [DubSpeechSegment]) -> [SpeechInterval] {
+    private func mergedSpeechIntervals(_ segments: [DubSpeechSegment], duckFadeSeconds: TimeInterval) -> [SpeechInterval] {
         let mergeGap = duckFadeSeconds * 2
         let ordered = segments
             .map { SpeechInterval(start: Double($0.startMs) / 1_000, end: Double($0.endMs) / 1_000) }

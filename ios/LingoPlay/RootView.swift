@@ -23,6 +23,9 @@ struct RootView: View {
         .sheet(isPresented: $model.plusPresented) {
             PlusView(model: model)
         }
+        .sheet(isPresented: $model.aboutPresented) {
+            AboutView(model: model)
+        }
         .task {
             guard model.stage == .splash else { return }
             try? await Task.sleep(for: .milliseconds(900))

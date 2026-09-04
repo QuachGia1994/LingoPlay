@@ -33,6 +33,10 @@ All notable changes to LingoPlay are documented here.
 - A truthful Clean Background capability state on both clients. The current build does not claim ML source separation because no verified cross-platform separator engine is bundled yet.
 - Stage 11 durable processing recovery: app-owned imported media, local checkpoints, Resume/Discard after interruption, Android Picture-in-Picture, and native iOS AVPlayerViewController Picture-in-Picture on the existing single player.
 - Stage 12 local-only bounded diagnostics, iOS PrivacyInfo.xcprivacy required-reason declarations, Android cleartext-network blocking, and CI privacy/security verification.
+- Stage 13 persisted dubbing preferences with real downstream behavior: source-language override, target-language selection constrained to installed offline voices, installed voice choice, three soundtrack/dub mix presets, Off/Translated/Bilingual subtitle modes, and real playback-speed control on both clients.
+- Stage 13 interaction-completeness pass removes fake/dead affordances: Android no longer presents a disabled live-blend slider for its single mixed output, unavailable actions do not render as tappable controls, and About/Plus/settings rows now open real behavior.
+- Stage 14 Android Google Play Billing 9.1.0 subscription pre-wiring for the same weekly/monthly Plus product IDs as iOS, with PURCHASED-only entitlement, pending-safe behavior, restore/reconciliation, and acknowledgement after local entitlement delivery.
+- Stage 14 source-separation engine protocols/capability seams on both clients. Clean Background remains disabled until a verified native separator engine/model is actually present.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
@@ -63,3 +67,6 @@ All notable changes to LingoPlay are documented here.
 - Android ASR chunk-boundary silence detection is now relative to each chunk's RMS so quiet real speech is not mistaken for silence; very-low-level noise is no longer amplified by TTS normalization.
 - Android recovery checkpoint replacement now prefers atomic filesystem move and app-owned import deletion is canonical-root constrained.
 - iOS local diagnostics now rewrite atomically instead of appending in-place; return-home cleanup explicitly avoids the active Library URL.
+- Translation/TTS is no longer hard-coded to Vietnamese in the client pipeline: selected target language flows into translation and an installed matching system voice; missing offline voice stops explicitly rather than falling back to network TTS.
+- Android/iOS dubbing mode now changes actual duck floor, fade envelope, and dub gain instead of only changing a UI label; subtitle mode and playback speed likewise control the active player.
+- Android Plus state is derived from current Google Play purchases rather than a persisted unlock boolean. Sideload/debug builds with no matching Play Console products report products unavailable instead of fabricating pricing or entitlement.

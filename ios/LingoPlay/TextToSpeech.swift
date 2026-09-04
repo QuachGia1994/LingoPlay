@@ -29,19 +29,19 @@ enum TTSState: Equatable {
 }
 
 enum TTSError: LocalizedError {
-    case offlineVietnameseVoiceMissing
+    case offlineVoiceMissing(String)
     case synthesisFailed(String)
     case durationFitFailed(String)
     case invalidAudio
 
     var errorDescription: String? {
         switch self {
-        case .offlineVietnameseVoiceMissing:
-            "No Vietnamese system voice is available on this device."
+        case let .offlineVoiceMissing(languageCode):
+            "No offline system voice is available for language '\(languageCode)' on this device."
         case let .synthesisFailed(message):
-            "Vietnamese speech synthesis failed: \(message)"
+            "Speech synthesis failed: \(message)"
         case let .durationFitFailed(segmentID):
-            "Vietnamese speech for \(segmentID) is still longer than its source time window after safe speed fitting."
+            "Speech for \(segmentID) is still longer than its source time window after safe speed fitting."
         case .invalidAudio:
             "The synthesized speech file is invalid."
         }
@@ -82,9 +82,12 @@ enum DurationFitPolicy {
 final class SystemVietnameseTTSService {
     func synthesize(
         document: TranslationDocument,
+        preferredVoiceIdentifier: String? = nil,
         progress: @MainActor @Sendable (Int, Int) -> Void
     ) async throws -> DubSpeechDocument {
-        guard let voice = vietnameseVoice() else { throw TTSError.offlineVietnameseVoiceMissing }
+        guard let voice = offlineVoice(languageCode: document.targetLanguage, preferredIdentifier: preferredVoiceIdentifier) else {
+            throw TTSError.offlineVoiceMissing(document.targetLanguage)
+        }
         let root = try makeSessionDirectory()
         var output: [DubSpeechSegment] = []
 
@@ -97,10 +100,15 @@ final class SystemVietnameseTTSService {
         return DubSpeechDocument(voiceIdentifier: voice.identifier, segments: output)
     }
 
-    private func vietnameseVoice() -> AVSpeechSynthesisVoice? {
-        AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language.lowercased().hasPrefix("vi") }
-            .max { lhs, rhs in lhs.quality.rawValue < rhs.quality.rawValue }
+    private func offlineVoice(languageCode: String, preferredIdentifier: String?) -> AVSpeechSynthesisVoice? {
+        let normalized = languageCode.lowercased().split(separator: "-").first.map(String.init) ?? languageCode.lowercased()
+        let eligible = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.lowercased().hasPrefix(normalized) }
+        if let preferredIdentifier,
+           let preferred = eligible.first(where: { $0.identifier == preferredIdentifier }) {
+            return preferred
+        }
+        return eligible.max { lhs, rhs in lhs.quality.rawValue < rhs.quality.rawValue }
     }
 
     private func makeSessionDirectory() throws -> URL {

@@ -81,8 +81,8 @@ internal object AudioQualityPolicy {
 }
 
 object TimelinePlacementPolicy {
-    const val DUCK_FLOOR = 0.12f
-    const val DUCK_FADE_MS = 80
+    const val DUCK_FLOOR = 0.16f
+    const val DUCK_FADE_MS = 120
 
     fun frameAt(timeMs: Int, sampleRate: Int): Long {
         require(timeMs >= 0)
@@ -98,22 +98,26 @@ object TimelinePlacementPolicy {
 
     fun clampPcm16(value: Int): Short = value.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
 
-    fun duckGainAt(timeMs: Double, segments: List<DubSpeechSegment>): Float {
+    fun duckGainAt(
+        timeMs: Double,
+        segments: List<DubSpeechSegment>,
+        mode: DubbingModePreset = DubbingModePreset.BALANCED,
+    ): Float {
         var gain = 1f
         segments.forEach { segment ->
             val start = segment.startMs.toDouble()
             val end = segment.endMs.toDouble()
-            val fade = DUCK_FADE_MS.toDouble()
+            val fade = mode.duckFadeMs.toDouble()
             val local = when {
                 timeMs < start - fade || timeMs > end + fade -> 1f
                 timeMs < start -> {
                     val progress = ((timeMs - (start - fade)) / fade).coerceIn(0.0, 1.0).toFloat()
-                    1f + (DUCK_FLOOR - 1f) * progress
+                    1f + (mode.duckFloor - 1f) * progress
                 }
-                timeMs <= end -> DUCK_FLOOR
+                timeMs <= end -> mode.duckFloor
                 else -> {
                     val progress = ((timeMs - end) / fade).coerceIn(0.0, 1.0).toFloat()
-                    DUCK_FLOOR + (1f - DUCK_FLOOR) * progress
+                    mode.duckFloor + (1f - mode.duckFloor) * progress
                 }
             }
             gain = minOf(gain, local)
@@ -135,6 +139,7 @@ object TimelineMixService {
         context: Context,
         media: LocalMediaItem,
         dub: DubSpeechDocument,
+        mode: DubbingModePreset = DubbingModePreset.BALANCED,
         onPhase: suspend (MixPhase) -> Unit = {},
     ): LocalDubMediaResult = withContext(Dispatchers.IO) {
         require(dub.segments.isNotEmpty()) { "No Vietnamese speech clips are available to mix." }
@@ -149,7 +154,7 @@ object TimelineMixService {
 
         try {
             onPhase(MixPhase.RENDERING_AUDIO)
-            renderMixedAudio(context, media, dub, mixedAudio)
+            renderMixedAudio(context, media, dub, mode, mixedAudio)
 
             onPhase(MixPhase.REMUXING)
             remuxVideoWithMixedAudio(context, media.uri, mixedAudio, remuxedVideo)
@@ -169,6 +174,7 @@ object TimelineMixService {
         context: Context,
         media: LocalMediaItem,
         dub: DubSpeechDocument,
+        mode: DubbingModePreset,
         destination: File,
     ) {
         val extractor = openExtractor(context, media.uri)
@@ -287,6 +293,7 @@ object TimelineMixService {
                                     endUs = startUs,
                                     sampleRate = targetRate,
                                     channels = targetChannels,
+                                    mode = mode,
                                 )
                             }
                             mixOriginalAndSpeech(
@@ -296,6 +303,7 @@ object TimelineMixService {
                                 channels = targetChannels,
                                 dub = dub,
                                 clipCache = clipCache,
+                                mode = mode,
                             )
                             requireNotNull(encoder).queuePcm(normalized, startUs)
                             val frames = normalized.size / targetChannels
@@ -319,6 +327,7 @@ object TimelineMixService {
                     endUs = mediaEndUs,
                     sampleRate = targetRate,
                     channels = targetChannels,
+                    mode = mode,
                 )
                 timelineCursorUs = mediaEndUs
             }
@@ -340,13 +349,14 @@ object TimelineMixService {
         channels: Int,
         dub: DubSpeechDocument,
         clipCache: SpeechClipCache,
+        mode: DubbingModePreset,
     ) {
         val frames = pcm.size / channels
         if (frames <= 0) return
         val chunkEndUs = startUs + frames * 1_000_000L / sampleRate.toLong()
         val relevant = dub.segments.filter { segment ->
             val speechEndUs = (segment.startMs.toLong() + segment.speechDurationMs.toLong()) * 1_000L
-            val duckEndUs = (segment.endMs.toLong() + TimelinePlacementPolicy.DUCK_FADE_MS) * 1_000L
+            val duckEndUs = (segment.endMs.toLong() + mode.duckFadeMs) * 1_000L
             segment.startMs.toLong() * 1_000L <= chunkEndUs && max(speechEndUs, duckEndUs) >= startUs
         }
         val loaded = relevant.associateWith { clipCache.load(it, sampleRate, channels) }
@@ -354,7 +364,7 @@ object TimelineMixService {
         for (frame in 0 until frames) {
             val timeUs = startUs + frame * 1_000_000L / sampleRate.toLong()
             val timeMs = timeUs / 1_000.0
-            val duckGain = TimelinePlacementPolicy.duckGainAt(timeMs, relevant)
+            val duckGain = TimelinePlacementPolicy.duckGainAt(timeMs, relevant, mode)
             for (channel in 0 until channels) {
                 val index = frame * channels + channel
                 var mixed = (pcm[index].toInt() * duckGain).roundToInt()
@@ -364,7 +374,7 @@ object TimelineMixService {
                     if (offsetUs >= 0L) {
                         val clipFrame = (offsetUs * sampleRate.toLong() / 1_000_000L).toInt()
                         if (clipFrame in 0 until clip.frames) {
-                            mixed += clip.samples[clipFrame * channels + channel].toInt()
+                            mixed += (clip.samples[clipFrame * channels + channel].toFloat() * mode.dubGain).roundToInt()
                         }
                     }
                 }
@@ -382,6 +392,7 @@ object TimelineMixService {
         endUs: Long,
         sampleRate: Int,
         channels: Int,
+        mode: DubbingModePreset,
     ) {
         var cursorUs = startUs
         val chunkFrames = max(1, sampleRate * SILENCE_CHUNK_MS / 1_000)
@@ -389,7 +400,7 @@ object TimelineMixService {
             val remainingFrames = ((endUs - cursorUs) * sampleRate / 1_000_000L).coerceAtLeast(1L)
             val frames = minOf(chunkFrames.toLong(), remainingFrames).toInt()
             val pcm = ShortArray(frames * channels)
-            mixOriginalAndSpeech(pcm, cursorUs, sampleRate, channels, dub, clipCache)
+            mixOriginalAndSpeech(pcm, cursorUs, sampleRate, channels, dub, clipCache, mode)
             encoder.queuePcm(pcm, cursorUs)
             cursorUs += frames * 1_000_000L / sampleRate.toLong()
         }

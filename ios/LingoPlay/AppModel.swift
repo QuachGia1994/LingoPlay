@@ -35,11 +35,35 @@ final class AppModel {
     var audioBlend = 0.60 {
         didSet { updatePlayerMix() }
     }
-    var playbackSpeed = 1.0
+    var playbackSpeed = UserDefaults.standard.object(forKey: "lingoplay.playbackSpeed") as? Double ?? 1.0 {
+        didSet {
+            UserDefaults.standard.set(playbackSpeed, forKey: "lingoplay.playbackSpeed")
+            applyPlaybackSpeed()
+        }
+    }
+    var sourceLanguageChoice = SourceLanguageChoice(rawValue: UserDefaults.standard.string(forKey: "lingoplay.sourceLanguage") ?? "auto") ?? .auto {
+        didSet { UserDefaults.standard.set(sourceLanguageChoice.rawValue, forKey: "lingoplay.sourceLanguage") }
+    }
+    var targetLanguageChoice = TargetLanguageChoice(rawValue: UserDefaults.standard.string(forKey: "lingoplay.targetLanguage") ?? "vi") ?? .vi {
+        didSet {
+            UserDefaults.standard.set(targetLanguageChoice.rawValue, forKey: "lingoplay.targetLanguage")
+            if !availableTargetVoices.contains(where: { $0.id == preferredVoiceIdentifier }) {
+                preferredVoiceIdentifier = nil
+            }
+        }
+    }
+    var dubbingMode = DubbingModePreset(rawValue: UserDefaults.standard.string(forKey: "lingoplay.dubbingMode") ?? "balanced") ?? .balanced {
+        didSet { UserDefaults.standard.set(dubbingMode.rawValue, forKey: "lingoplay.dubbingMode") }
+    }
+    var subtitleMode = SubtitleMode(rawValue: UserDefaults.standard.string(forKey: "lingoplay.subtitleMode") ?? "bilingual") ?? .bilingual {
+        didSet { UserDefaults.standard.set(subtitleMode.rawValue, forKey: "lingoplay.subtitleMode") }
+    }
+    var preferredVoiceIdentifier = UserDefaults.standard.string(forKey: "lingoplay.preferredVoice") {
+        didSet { UserDefaults.standard.set(preferredVoiceIdentifier, forKey: "lingoplay.preferredVoice") }
+    }
     var wifiOnly = UserDefaults.standard.object(forKey: "lingoplay.wifiOnly") as? Bool ?? true {
         didSet { UserDefaults.standard.set(wifiOnly, forKey: "lingoplay.wifiOnly") }
     }
-    var bilingualSubtitles = true
     var highContrast = UserDefaults.standard.bool(forKey: "lingoplay.highContrast")
     var uiLanguageCode = UserDefaults.standard.string(forKey: "lingoplay.uiLanguage") ?? "en"
     var importerPresented = false
@@ -51,6 +75,7 @@ final class AppModel {
     var mixState: MixState = .idle
     var modelInstallState: ASRModelInstallState = .notInstalled
     var plusPresented = false
+    var aboutPresented = false
     var pendingRecovery: ProcessingRecoveryCheckpoint?
     var processedMedia: LocalDubMediaResult?
     var libraryItems: [LocalLibraryItem] = []
@@ -180,7 +205,11 @@ final class AppModel {
         asrState = .loadingModel
         do {
             asrState = .transcribing
-            let transcript = try await speechRecognizer.transcribe(audioURL: audioURL, model: model)
+            let transcript = try await speechRecognizer.transcribe(
+                audioURL: audioURL,
+                model: model,
+                sourceLanguageCode: sourceLanguageChoice.code
+            )
             asrState = .completed(transcript)
             processingProgress = 0.4
             await translateTranscript(transcript)
@@ -199,7 +228,7 @@ final class AppModel {
         do {
             let document = try await translationService.translate(
                 transcript: transcript,
-                targetLanguage: "vi",
+                targetLanguage: targetLanguageChoice.code,
                 endpoint: endpoint
             ) { [weak self] batch, total in
                 self?.translationState = .translating(batch: batch, totalBatches: total)
@@ -217,7 +246,10 @@ final class AppModel {
 
     private func synthesizeVietnameseSpeech(_ document: TranslationDocument) async {
         do {
-            let dub = try await ttsService.synthesize(document: document) { [weak self] segment, total in
+            let dub = try await ttsService.synthesize(
+                document: document,
+                preferredVoiceIdentifier: preferredVoiceIdentifier
+            ) { [weak self] segment, total in
                 self?.ttsState = .synthesizing(segment: segment, totalSegments: total)
                 let ratio = total > 0 ? Double(segment) / Double(total) : 0
                 self?.processingProgress = 0.6 + (0.2 * ratio)
@@ -225,7 +257,7 @@ final class AppModel {
             ttsState = .completed(dub)
             processingProgress = 0.8
             await renderDubbedMedia(dub)
-        } catch TTSError.offlineVietnameseVoiceMissing {
+        } catch TTSError.offlineVoiceMissing(_) {
             await diagnostics.record("tts_voice_missing")
             ttsState = .voiceMissing
         } catch {
@@ -237,7 +269,11 @@ final class AppModel {
     private func renderDubbedMedia(_ dub: DubSpeechDocument) async {
         guard let selectedMedia else { return }
         do {
-            let result = try await timelineMixService.render(media: selectedMedia, dub: dub) { [weak self] state in
+            let result = try await timelineMixService.render(
+                media: selectedMedia,
+                dub: dub,
+                mode: dubbingMode
+            ) { [weak self] state in
                 self?.mixState = state
                 switch state {
                 case .renderingAudio:
@@ -426,7 +462,7 @@ final class AppModel {
             pausePlayback()
             return
         }
-        videoPlayer.play()
+        videoPlayer.playImmediately(atRate: Float(playbackSpeed))
         isPlaying = true
     }
 
@@ -460,7 +496,8 @@ final class AppModel {
             media: selectedMedia,
             dubbedAudioURL: result.dubbedAudioURL,
             speechSegments: dub.segments,
-            blend: audioBlend
+            blend: audioBlend,
+            mode: dubbingMode
         )
         let player = AVPlayer(playerItem: session.item)
         videoPlayer = player
@@ -514,6 +551,13 @@ final class AppModel {
         item.audioMix = timelineMixService.makePlaybackAudioMix(context: context, blend: audioBlend)
     }
 
+    private func applyPlaybackSpeed() {
+        guard let videoPlayer else { return }
+        if isPlaying {
+            videoPlayer.playImmediately(atRate: Float(playbackSpeed))
+        }
+    }
+
     private func teardownPlayback() {
         pausePlayback()
         if let playbackTimeObserver, let videoPlayer {
@@ -525,6 +569,58 @@ final class AppModel {
         videoPlayer = nil
         playbackPosition = 0
         playbackDuration = 0
+    }
+
+    var availableOfflineVoices: [OfflineVoiceOption] {
+        DubbingPreferencePolicy.availableOfflineVoices()
+    }
+
+    var availableTargetVoices: [OfflineVoiceOption] {
+        availableOfflineVoices.filter { $0.languageCode == targetLanguageChoice.code }
+    }
+
+    var preferredVoiceLabel: String {
+        availableTargetVoices.first(where: { $0.id == preferredVoiceIdentifier })?.label ?? "Automatic"
+    }
+
+    func cycleSourceLanguage() {
+        let values = SourceLanguageChoice.allCases
+        let index = values.firstIndex(of: sourceLanguageChoice) ?? 0
+        sourceLanguageChoice = values[(index + 1) % values.count]
+    }
+
+    func cycleTargetLanguage() {
+        let availableCodes = Set(availableOfflineVoices.map(\.languageCode))
+        let values = TargetLanguageChoice.allCases.filter { availableCodes.contains($0.code) }
+        let candidates = values.isEmpty ? [.vi] : values
+        let index = candidates.firstIndex(of: targetLanguageChoice) ?? -1
+        targetLanguageChoice = candidates[(index + 1) % candidates.count]
+    }
+
+    func cycleVoice() {
+        let candidates: [String?] = [nil] + availableTargetVoices.map(\.id)
+        let index = candidates.firstIndex(where: { $0 == preferredVoiceIdentifier }) ?? 0
+        preferredVoiceIdentifier = candidates[(index + 1) % candidates.count]
+    }
+
+    func cycleDubbingMode() {
+        let values = DubbingModePreset.allCases
+        let index = values.firstIndex(of: dubbingMode) ?? 0
+        dubbingMode = values[(index + 1) % values.count]
+    }
+
+    func cycleSubtitleMode() {
+        let values = SubtitleMode.allCases
+        let index = values.firstIndex(of: subtitleMode) ?? 0
+        subtitleMode = values[(index + 1) % values.count]
+    }
+
+    func cyclePlaybackSpeed() {
+        playbackSpeed = DubbingPreferencePolicy.nextPlaybackSpeed(after: playbackSpeed)
+    }
+
+    func localDiagnosticsCount() async -> Int {
+        await diagnostics.recent().count
     }
 
     var uiLanguageLabel: String {

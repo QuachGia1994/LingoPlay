@@ -56,8 +56,26 @@ class TimelinePlacementPolicyTest {
             rateMultiplier = 1f,
         )
         assertEquals(1f, TimelinePlacementPolicy.duckGainAt(800.0, listOf(segment)), 0.001f)
-        assertEquals(0.56f, TimelinePlacementPolicy.duckGainAt(960.0, listOf(segment)), 0.02f)
-        assertEquals(TimelinePlacementPolicy.DUCK_FLOOR, TimelinePlacementPolicy.duckGainAt(1_500.0, listOf(segment)), 0.001f)
-        assertEquals(1f, TimelinePlacementPolicy.duckGainAt(2_100.0, listOf(segment)), 0.001f)
+        assertEquals(0.44f, TimelinePlacementPolicy.duckGainAt(960.0, listOf(segment)), 0.02f)
+        assertEquals(DubbingModePreset.BALANCED.duckFloor, TimelinePlacementPolicy.duckGainAt(1_500.0, listOf(segment)), 0.001f)
+        assertEquals(1f, TimelinePlacementPolicy.duckGainAt(2_200.0, listOf(segment)), 0.001f)
+    }
+
+    @Test
+    fun dubbingModesProduceDistinctRealDuckPolicies() {
+        val segment = DubSpeechSegment(
+            id = "s1",
+            startMs = 1_000,
+            endMs = 2_000,
+            audioFile = File("unused.wav"),
+            speechDurationMs = 900,
+            tailSilenceMs = 100,
+            rateMultiplier = 1f,
+        )
+        val speechFocus = TimelinePlacementPolicy.duckGainAt(1_500.0, listOf(segment), DubbingModePreset.SPEECH_FOCUS)
+        val balanced = TimelinePlacementPolicy.duckGainAt(1_500.0, listOf(segment), DubbingModePreset.BALANCED)
+        val originalFocus = TimelinePlacementPolicy.duckGainAt(1_500.0, listOf(segment), DubbingModePreset.ORIGINAL_FOCUS)
+        assertTrue(speechFocus < balanced)
+        assertTrue(balanced < originalFocus)
     }
 }

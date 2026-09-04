@@ -70,6 +70,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.android.billingclient:billing:9.1.0")
 
     val localSherpaAar = file("libs/sherpa-onnx-1.13.7.aar")
     if (localSherpaAar.exists()) {

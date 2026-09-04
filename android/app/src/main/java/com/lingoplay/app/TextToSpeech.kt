@@ -41,8 +41,8 @@ enum class TTSPhase {
     FAILED,
 }
 
-class OfflineVietnameseVoiceMissingException : IllegalStateException(
-    "No offline Vietnamese system voice is installed on this device.",
+class OfflineTargetVoiceMissingException(val languageCode: String) : IllegalStateException(
+    "No offline system voice is installed for language '$languageCode' on this device.",
 )
 
 object DurationFitPolicy {
@@ -70,13 +70,14 @@ object SystemVietnameseTTSService {
     suspend fun synthesize(
         context: Context,
         document: TranslationDocument,
+        preferredVoiceName: String? = null,
         onProgress: suspend (segment: Int, total: Int) -> Unit = { _, _ -> },
     ): DubSpeechDocument {
         val tts = createTts(context)
         try {
-            val voice = selectOfflineVietnameseVoice(tts)
-                ?: throw OfflineVietnameseVoiceMissingException()
-            check(tts.setVoice(voice) == TextToSpeech.SUCCESS) { "Unable to select the offline Vietnamese voice." }
+            val voice = selectOfflineVoice(tts, document.targetLanguage, preferredVoiceName)
+                ?: throw OfflineTargetVoiceMissingException(document.targetLanguage)
+            check(tts.setVoice(voice) == TextToSpeech.SUCCESS) { "Unable to select the offline system voice." }
 
             val root = File(context.cacheDir, "lingoplay/tts/${UUID.randomUUID()}").apply { mkdirs() }
             val output = mutableListOf<DubSpeechSegment>()
@@ -90,7 +91,28 @@ object SystemVietnameseTTSService {
         }
     }
 
-    fun hasOfflineVietnameseVoice(tts: TextToSpeech): Boolean = selectOfflineVietnameseVoice(tts) != null
+    suspend fun availableOfflineVoices(context: Context): List<OfflineVoiceOption> {
+        val tts = createTts(context)
+        return try {
+            tts.voices.orEmpty()
+                .asSequence()
+                .filterNot { it.isNetworkConnectionRequired }
+                .map { voice ->
+                    OfflineVoiceOption(
+                        id = voice.name,
+                        label = "${voice.locale.displayLanguage} · ${voice.name}",
+                        languageCode = voice.locale.language.lowercase(),
+                    )
+                }
+                .distinctBy(OfflineVoiceOption::id)
+                .sortedWith(compareBy<OfflineVoiceOption> { it.languageCode }.thenBy { it.label })
+                .toList()
+        } finally {
+            withContext(Dispatchers.Main.immediate) { tts.shutdown() }
+        }
+    }
+
+    fun hasOfflineVietnameseVoice(tts: TextToSpeech): Boolean = selectOfflineVoice(tts, "vi", null) != null
 
     private suspend fun createTts(context: Context): TextToSpeech = withContext(Dispatchers.Main.immediate) {
         val initialized = CompletableDeferred<Int>()
@@ -103,14 +125,17 @@ object SystemVietnameseTTSService {
         tts
     }
 
-    private fun selectOfflineVietnameseVoice(tts: TextToSpeech): Voice? {
-        return tts.voices
+    private fun selectOfflineVoice(tts: TextToSpeech, languageCode: String, preferredVoiceName: String?): Voice? {
+        val eligible = tts.voices
             .orEmpty()
             .asSequence()
-            .filter { it.locale.language.equals("vi", ignoreCase = true) }
+            .filter { it.locale.language.equals(languageCode.substringBefore('-'), ignoreCase = true) }
             .filterNot { it.isNetworkConnectionRequired }
-            .sortedWith(compareByDescending<Voice> { it.quality }.thenBy { it.latency })
-            .firstOrNull()
+            .toList()
+        preferredVoiceName?.let { preferred ->
+            eligible.firstOrNull { it.name == preferred }?.let { return it }
+        }
+        return eligible.sortedWith(compareByDescending<Voice> { it.quality }.thenBy { it.latency }).firstOrNull()
     }
 
     private suspend fun synthesizeSegment(

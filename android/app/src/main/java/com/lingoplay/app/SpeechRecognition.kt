@@ -109,13 +109,18 @@ object InferenceMemoryPolicy {
 }
 
 object SherpaWhisperSpeechRecognizer {
-    suspend fun transcribe(context: Context, audioFile: File, model: SherpaWhisperModel): ASRTranscript = withContext(Dispatchers.Default) {
+    suspend fun transcribe(
+        context: Context,
+        audioFile: File,
+        model: SherpaWhisperModel,
+        sourceLanguageCode: String? = null,
+    ): ASRTranscript = withContext(Dispatchers.Default) {
         val budget = InferenceMemoryPolicy.forDevice(context)
         InferenceMemoryGate.reset()
         val whisper = OfflineWhisperModelConfig(
             encoder = model.encoder.absolutePath,
             decoder = model.decoder.absolutePath,
-            language = "",
+            language = sourceLanguageCode.orEmpty(),
             task = "transcribe",
             tailPaddings = 300,
         )
