@@ -67,7 +67,7 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - `Clean Background` is deliberately reported as unavailable. The current artifact does not bundle a verified cross-platform source-separation engine, so the product does not pretend adaptive ducking is stem separation.
 
 ## Stage 11 lifecycle boundary
-- Both clients copy selected video into app-owned local storage before processing and persist a small local recovery checkpoint. If the process is interrupted, Home offers Resume/Discard; resume uses prepared audio when it still exists and otherwise restarts from the owned source video.
+- Both clients copy selected video into app-owned local storage before processing and persist a small local recovery checkpoint. The checkpoint also carries the immutable processing configuration (source/target language, preferred voice, dubbing mode, subtitle mode), so Resume cannot silently adopt Settings changed after the original run began. If the process is interrupted, Home offers Resume/Discard; resume uses prepared audio when it still exists and otherwise restarts from the owned source video.
 - Android Picture-in-Picture uses the same Activity/VideoView playback path. iOS playback uses `AVPlayerViewController` with Picture-in-Picture enabled on the same AVPlayer and a playback audio session.
 - Recovery is the guarantee; unlimited background inference is not. No long-running WorkManager/BGProcessing architecture is presented as guaranteed immediate execution.
 
@@ -83,7 +83,7 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Android intentionally does not show a fake live Original↔Dub slider for its already-mixed MP4. Controls that cannot act are hidden or rendered without a chevron/action affordance; About and Plus surfaces are real screens/sheets.
 
 ## Stage 14 advanced-capability boundary
-- Android Plus parity uses Google Play Billing 9.1.0 as described above; iOS remains StoreKit 2. Neither client treats a persisted local flag as billing authority.
+- Android Plus parity uses Google Play Billing 9.1.0 as described above; iOS remains StoreKit 2. Neither client treats a persisted local flag as billing authority. Android Billing connection startup is serialized and service disconnects schedule a single reconnect; subscription offer selection prefers the base-plan offer instead of arbitrary list ordering.
 - Both clients define an explicit source-separation engine protocol/capability seam. `Clean Background` remains unavailable because this artifact still has no verified cross-platform native separator engine/model; adaptive ducking is not presented as stem separation.
 - Advanced voice in the shipped build means choosing among installed system voices that can run on the selected local path. Unavailable neural/multi-speaker/source-separation features are not advertised as active.
 

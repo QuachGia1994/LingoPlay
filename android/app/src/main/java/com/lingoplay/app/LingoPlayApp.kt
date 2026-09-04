@@ -160,10 +160,18 @@ fun LingoPlayApp() {
     var playbackSpeed by rememberSaveable { mutableFloatStateOf(dubbingPreferences.playbackSpeed) }
     var preferredVoiceId by rememberSaveable { mutableStateOf(dubbingPreferences.preferredVoiceId) }
     var offlineVoices by remember { mutableStateOf<List<OfflineVoiceOption>>(emptyList()) }
+    var activeProcessingConfig by remember { mutableStateOf<ProcessingConfig?>(null) }
     val sourceLanguage = runCatching { SourceLanguageChoice.valueOf(sourceLanguageName) }.getOrDefault(SourceLanguageChoice.AUTO)
     val targetLanguage = runCatching { TargetLanguageChoice.valueOf(targetLanguageName) }.getOrDefault(TargetLanguageChoice.VIETNAMESE)
     val dubbingMode = runCatching { DubbingModePreset.valueOf(dubbingModeName) }.getOrDefault(DubbingModePreset.BALANCED)
     val subtitleMode = runCatching { SubtitleMode.valueOf(subtitleModeName) }.getOrDefault(SubtitleMode.BILINGUAL)
+    val currentProcessingConfig = ProcessingConfig(
+        sourceLanguage = sourceLanguage,
+        targetLanguage = targetLanguage,
+        preferredVoiceId = preferredVoiceId,
+        dubbingMode = dubbingMode,
+        subtitleMode = subtitleMode,
+    )
     val availableTargetCodes = offlineVoices.map { it.languageCode.substringBefore('-') }.toSet()
     val targetVoices = offlineVoices.filter { it.languageCode.substringBefore('-') == targetLanguage.code.substringBefore('-') }
     val preferredVoiceLabel = targetVoices.firstOrNull { it.id == preferredVoiceId }?.label ?: "Automatic"
@@ -265,6 +273,7 @@ fun LingoPlayApp() {
                 preparedAudioFile = null
                 ProcessingCheckpointStore.clear(context, deleteMedia = true)
                 pendingRecovery = null
+                activeProcessingConfig = null
                 LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
                 mediaState = MediaPreparationState.IMPORTING.name
                 mediaError = null
@@ -299,6 +308,10 @@ fun LingoPlayApp() {
         }
     }
 
+    DisposableEffect(plusStore) {
+        onDispose { plusStore.stop() }
+    }
+
     LaunchedEffect(Unit) {
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
@@ -314,6 +327,7 @@ fun LingoPlayApp() {
         processingGate.run {
         val media = selectedMedia
         val reusableAudio = preparedAudioFile?.takeIf(File::isFile)
+        val runConfig = activeProcessingConfig ?: currentProcessingConfig.also { activeProcessingConfig = it }
         val canProcess = mediaState == MediaPreparationState.READY.name ||
             (mediaState == MediaPreparationState.AUDIO_READY.name && reusableAudio != null)
         if (stageName == Stage.PROCESSING.name && media != null && canProcess) {
@@ -326,7 +340,7 @@ fun LingoPlayApp() {
                     LocalMediaRepository.extractAudio(context, media).also { extracted ->
                         preparedAudioFile = extracted
                         mediaState = MediaPreparationState.AUDIO_READY.name
-                        ProcessingCheckpointStore.save(context, media, extracted)
+                        ProcessingCheckpointStore.save(context, media, extracted, runConfig)
                     }
                 }
                 val model = ASRModelStore.findWhisperModel(context)
@@ -340,7 +354,7 @@ fun LingoPlayApp() {
                         context = context,
                         audioFile = audioFile,
                         model = model,
-                        sourceLanguageCode = sourceLanguage.code,
+                        sourceLanguageCode = runConfig.sourceLanguage.code,
                     )
                     asrPhaseName = ASRPhase.COMPLETED.name
                     val transcript = asrTranscript ?: error("Speech transcript was not retained.")
@@ -351,7 +365,7 @@ fun LingoPlayApp() {
                         translationError = null
                         translationDocument = TranslationService.translate(
                             transcript = transcript,
-                            targetLanguage = targetLanguage.code,
+                            targetLanguage = runConfig.targetLanguage.code,
                         ) { batch, total ->
                             withContext(Dispatchers.Main.immediate) {
                                 translationBatch = batch
@@ -366,7 +380,7 @@ fun LingoPlayApp() {
                             dubSpeechDocument = SystemVietnameseTTSService.synthesize(
                                 context = context,
                                 document = translated,
-                                preferredVoiceName = preferredVoiceId,
+                                preferredVoiceName = runConfig.preferredVoiceId,
                             ) { segment, total ->
                                 withContext(Dispatchers.Main.immediate) {
                                     ttsSegment = segment
@@ -381,18 +395,25 @@ fun LingoPlayApp() {
                                     context = context,
                                     media = media,
                                     dub = dub,
-                                    mode = dubbingMode,
+                                    mode = runConfig.dubbingMode,
                                 ) { phase ->
                                     withContext(Dispatchers.Main.immediate) {
                                         mixPhaseName = phase.name
                                     }
                                 }
-                                val saved = LocalLibraryStore.save(context, media, rendered, translationDocument)
+                                val saved = LocalLibraryStore.save(
+                                    context = context,
+                                    media = media,
+                                    result = rendered,
+                                    translation = translationDocument,
+                                    dubbingMode = runConfig.dubbingMode,
+                                )
                                 LocalDiagnostics.record(context, "processing_completed")
                                 ProcessingCheckpointStore.clear(context, deleteMedia = true)
                                 pendingRecovery = null
                                 libraryItems = LocalLibraryStore.load(context)
                                 activeLibraryItem = saved
+                                activeProcessingConfig = null
                                 selectedMedia = LocalLibraryStore.importedMedia(saved)
                                 translationDocument = saved.asTranslationDocument()
                                 mixResult = saved.asProcessedResult()
@@ -488,6 +509,7 @@ fun LingoPlayApp() {
                             ProcessingCheckpointStore.clear(context, deleteMedia = true)
                             LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
                             selectedMedia = null
+                            activeProcessingConfig = null
                             mediaState = MediaPreparationState.IDLE.name
                             stageName = Stage.HOME.name
                         },
@@ -497,7 +519,9 @@ fun LingoPlayApp() {
                             if (media == null) {
                                 mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
                             } else {
-                                ProcessingCheckpointStore.save(context, media, preparedAudioFile)
+                                val runConfig = currentProcessingConfig
+                                activeProcessingConfig = runConfig
+                                ProcessingCheckpointStore.save(context, media, preparedAudioFile, runConfig)
                                 pendingRecovery = null
                                 stageName = Stage.PROCESSING.name
                             }
@@ -537,7 +561,7 @@ fun LingoPlayApp() {
                         processed = mixResult,
                         translation = translationDocument,
                         subtitleMode = subtitleMode,
-                        dubbingMode = dubbingMode,
+                        dubbingMode = activeLibraryItem?.dubbingMode,
                         playbackSpeed = playbackSpeed,
                         onSubtitleMode = cycleSubtitleMode,
                         onPlaybackSpeed = cyclePlaybackSpeed,
@@ -570,6 +594,7 @@ fun LingoPlayApp() {
                                 LocalDiagnostics.record(context, "recovery_resumed")
                                 selectedMedia = checkpoint.media
                                 preparedAudioFile = checkpoint.preparedAudioFile
+                                activeProcessingConfig = checkpoint.config ?: currentProcessingConfig
                                 mediaState = if (checkpoint.canResumeFromAudio) MediaPreparationState.AUDIO_READY.name else MediaPreparationState.READY.name
                                 asrPhaseName = ASRPhase.IDLE.name
                                 translationPhaseName = TranslationPhase.IDLE.name
@@ -584,6 +609,7 @@ fun LingoPlayApp() {
                                         LocalDiagnostics.record(context, "recovery_discarded")
                                         ProcessingCheckpointStore.clear(context, deleteMedia = true)
                                         pendingRecovery = null
+                                        activeProcessingConfig = null
                                     }
                                 }
                             },
@@ -1096,7 +1122,7 @@ private fun PlayerScreen(
     processed: LocalDubMediaResult?,
     translation: TranslationDocument?,
     subtitleMode: SubtitleMode,
-    dubbingMode: DubbingModePreset,
+    dubbingMode: DubbingModePreset?,
     playbackSpeed: Float,
     onSubtitleMode: () -> Unit,
     onPlaybackSpeed: () -> Unit,
@@ -1141,9 +1167,13 @@ private fun PlayerScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Final audio mix", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text(dubbingMode.label, color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(dubbingMode?.label ?: "Saved final mix", color = LpCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text(dubbingMode.detail, color = LpSecondaryText, fontSize = 12.sp)
+            Text(
+                dubbingMode?.detail ?: "Generation mode was not recorded by this older Library item.",
+                color = LpSecondaryText,
+                fontSize = 12.sp,
+            )
             Text(
                 "Android export contains one final mixed audio track. A fake live blend control is intentionally not shown.",
                 color = LpSecondaryText,
@@ -1300,7 +1330,7 @@ private fun SingleClockDubPlayer(
         }
     }
 
-    val activeSegment = translation?.segments?.lastOrNull { currentMs >= it.startMs && currentMs < it.endMs }
+    val activeSegment = translation?.segments?.lastOrNull { currentMs >= it.startMs && currentMs <= it.endMs }
     when (subtitleMode) {
         SubtitleMode.OFF -> Unit
         SubtitleMode.TRANSLATED -> LpCard {

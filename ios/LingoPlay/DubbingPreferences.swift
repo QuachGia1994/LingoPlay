@@ -40,7 +40,7 @@ enum TargetLanguageChoice: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum DubbingModePreset: String, CaseIterable, Identifiable, Sendable {
+enum DubbingModePreset: String, CaseIterable, Identifiable, Sendable, Codable {
     case balanced
     case speechFocus
     case originalFocus
@@ -101,6 +101,14 @@ struct OfflineVoiceOption: Identifiable, Hashable, Sendable {
     let id: String
     let label: String
     let languageCode: String
+}
+
+struct ProcessingConfig: Sendable, Equatable {
+    let sourceLanguage: SourceLanguageChoice
+    let targetLanguage: TargetLanguageChoice
+    let preferredVoiceIdentifier: String?
+    let dubbingMode: DubbingModePreset
+    let subtitleMode: SubtitleMode
 }
 
 enum DubbingPreferencePolicy {

@@ -20,6 +20,7 @@ data class LocalLibraryItem(
     val createdAtEpochMs: Long,
     val sourceLanguage: String,
     val targetLanguage: String,
+    val dubbingMode: DubbingModePreset?,
     val videoFile: File,
     val segments: List<TranslationSegment>,
 ) {
@@ -58,6 +59,7 @@ object LocalLibraryStore {
         media: LocalMediaItem,
         result: LocalDubMediaResult,
         translation: TranslationDocument?,
+        dubbingMode: DubbingModePreset,
     ): LocalLibraryItem = withContext(Dispatchers.IO) {
         check(result.remuxedVideoFile.isFile && result.remuxedVideoFile.length() > 0L) {
             "The processed video is missing and cannot be saved."
@@ -76,6 +78,7 @@ object LocalLibraryStore {
                 createdAtEpochMs = System.currentTimeMillis(),
                 sourceLanguage = translation?.sourceLanguage?.ifBlank { "und" } ?: "und",
                 targetLanguage = translation?.targetLanguage?.ifBlank { "vi" } ?: "vi",
+                dubbingMode = dubbingMode,
                 videoFile = destination,
                 segments = translation?.segments.orEmpty(),
             )
@@ -147,6 +150,9 @@ object LocalLibraryStore {
             createdAtEpochMs = json.optLong("createdAtEpochMs", directory.lastModified()),
             sourceLanguage = json.optString("sourceLanguage", "und"),
             targetLanguage = json.optString("targetLanguage", "vi"),
+            dubbingMode = json.optString("dubbingMode").takeIf(String::isNotBlank)?.let { value ->
+                runCatching { DubbingModePreset.valueOf(value) }.getOrNull()
+            },
             videoFile = video,
             segments = segments,
         )
@@ -159,6 +165,7 @@ object LocalLibraryStore {
         put("createdAtEpochMs", createdAtEpochMs)
         put("sourceLanguage", sourceLanguage)
         put("targetLanguage", targetLanguage)
+        dubbingMode?.let { put("dubbingMode", it.name) }
         put("segments", JSONArray().apply {
             segments.forEach { segment ->
                 put(JSONObject().apply {

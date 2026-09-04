@@ -19,6 +19,30 @@ class DubbingPreferencePolicyTest {
     }
 
     @Test
+    fun processingConfigRoundTripPreservesRecoverySnapshot() {
+        val expected = ProcessingConfig(
+            sourceLanguage = SourceLanguageChoice.JAPANESE,
+            targetLanguage = TargetLanguageChoice.JAPANESE,
+            preferredVoiceId = "ja-offline-a",
+            dubbingMode = DubbingModePreset.SPEECH_FOCUS,
+            subtitleMode = SubtitleMode.TRANSLATED,
+        )
+        assertEquals(expected, expected.toRecord().toConfig())
+    }
+
+    @Test
+    fun invalidRecoveryConfigDoesNotPartiallyApply() {
+        val invalid = ProcessingConfigRecord(
+            sourceLanguage = "JAPANESE",
+            targetLanguage = "NOT_A_LANGUAGE",
+            preferredVoiceId = "voice",
+            dubbingMode = "SPEECH_FOCUS",
+            subtitleMode = "BILINGUAL",
+        )
+        assertEquals(null, invalid.toConfig())
+    }
+
+    @Test
     fun cleanBackgroundRemainsUnavailableWithoutVerifiedEngine() {
         assertTrue(!CleanBackgroundCapability.isAvailable)
         assertEquals(SourceSeparationAvailability.UNAVAILABLE, CleanBackgroundCapability.engine.availability)

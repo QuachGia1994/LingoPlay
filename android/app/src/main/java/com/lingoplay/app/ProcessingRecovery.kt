@@ -19,6 +19,7 @@ internal class ProcessingRunGate {
 data class ProcessingCheckpoint(
     val media: LocalMediaItem,
     val preparedAudioFile: File?,
+    val config: ProcessingConfig?,
 ) {
     val canResumeFromAudio: Boolean get() = preparedAudioFile?.isFile == true
 }
@@ -47,10 +48,16 @@ object ProcessingCheckpointStore {
                 hasAudioTrack = json.optBoolean("hasAudioTrack", true),
             ),
             preparedAudioFile = audio,
+            config = json.optJSONObject("config")?.let(::configFromJson),
         )
     }.getOrNull()
 
-    fun save(context: Context, media: LocalMediaItem, preparedAudioFile: File? = null) {
+    fun save(
+        context: Context,
+        media: LocalMediaItem,
+        preparedAudioFile: File? = null,
+        config: ProcessingConfig? = null,
+    ) {
         val mediaPath = media.uri.takeIf { it.scheme == "file" }?.path ?: return
         val mediaFile = File(mediaPath)
         if (!mediaFile.isFile) return
@@ -63,6 +70,7 @@ object ProcessingCheckpointStore {
             put("sizeBytes", media.sizeBytes)
             put("hasAudioTrack", media.hasAudioTrack)
             put("preparedAudioPath", preparedAudioFile?.takeIf(File::isFile)?.absolutePath ?: "")
+            if (config != null) put("config", configToJson(config))
             put("updatedAtEpochMs", System.currentTimeMillis())
         }
         val temp = File(file.parentFile, "$FILE_NAME.tmp")
@@ -85,6 +93,25 @@ object ProcessingCheckpointStore {
         checkpoint?.preparedAudioFile?.delete()
         if (deleteMedia) LocalMediaRepository.deleteOwnedImport(context, checkpoint?.media)
     }
+
+    private fun configToJson(config: ProcessingConfig): JSONObject {
+        val record = config.toRecord()
+        return JSONObject().apply {
+            put("sourceLanguage", record.sourceLanguage)
+            put("targetLanguage", record.targetLanguage)
+            put("preferredVoiceId", record.preferredVoiceId ?: "")
+            put("dubbingMode", record.dubbingMode)
+            put("subtitleMode", record.subtitleMode)
+        }
+    }
+
+    private fun configFromJson(json: JSONObject): ProcessingConfig? = ProcessingConfigRecord(
+        sourceLanguage = json.getString("sourceLanguage"),
+        targetLanguage = json.getString("targetLanguage"),
+        preferredVoiceId = json.optString("preferredVoiceId").takeIf(String::isNotBlank),
+        dubbingMode = json.getString("dubbingMode"),
+        subtitleMode = json.optString("subtitleMode", SubtitleMode.BILINGUAL.name),
+    ).toConfig()
 
     private fun checkpointFile(context: Context): File = File(File(context.filesDir, ROOT), FILE_NAME)
 }

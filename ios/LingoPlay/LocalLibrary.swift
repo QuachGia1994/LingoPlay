@@ -7,6 +7,7 @@ struct LocalLibraryItem: Identifiable, Codable, Sendable, Equatable {
     let createdAt: Date
     let sourceLanguage: String
     let targetLanguage: String
+    let dubbingMode: DubbingModePreset?
     let videoFileName: String
     let segments: [TranslationSegment]
 
@@ -57,7 +58,8 @@ actor LocalLibraryStore {
     func save(
         media: LocalMediaItem,
         result: LocalDubMediaResult,
-        translation: TranslationDocument?
+        translation: TranslationDocument?,
+        dubbingMode: DubbingModePreset
     ) throws -> LocalLibraryItem {
         guard fileManager.fileExists(atPath: result.remuxedVideoURL.path) else {
             throw CocoaError(.fileNoSuchFile)
@@ -86,6 +88,7 @@ actor LocalLibraryStore {
             createdAt: Date(),
             sourceLanguage: translation?.sourceLanguage.isEmpty == false ? translation!.sourceLanguage : "und",
             targetLanguage: translation?.targetLanguage.isEmpty == false ? translation!.targetLanguage : "vi",
+            dubbingMode: dubbingMode,
             videoFileName: destination.lastPathComponent,
             segments: translation?.segments ?? []
         )

@@ -2,6 +2,8 @@ package com.lingoplay.app
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -53,6 +55,11 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
     var message by mutableStateOf<String?>(null)
         private set
 
+    private var connecting = false
+    private var shouldStayConnected = false
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val reconnectAction = Runnable { if (shouldStayConnected) start() }
+
     private val billingClient = BillingClient.newBuilder(context.applicationContext)
         .setListener(this)
         .enablePendingPurchases(
@@ -64,14 +71,20 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
         .build()
 
     fun start() {
+        shouldStayConnected = true
         if (billingClient.isReady) {
             refresh()
             return
         }
+        if (connecting) return
+        reconnectHandler.removeCallbacks(reconnectAction)
+        connecting = true
         phase = AndroidPlusPhase.CONNECTING
         message = null
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
+                connecting = false
+                if (!shouldStayConnected) return
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                     refresh()
                 } else {
@@ -80,14 +93,21 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
             }
 
             override fun onBillingServiceDisconnected() {
+                connecting = false
+                if (!shouldStayConnected) return
                 phase = AndroidPlusPhase.UNAVAILABLE
-                message = "Google Play Billing disconnected. Reopen Plus to retry."
+                message = "Google Play Billing disconnected. Retrying…"
+                reconnectHandler.removeCallbacks(reconnectAction)
+                reconnectHandler.postDelayed(reconnectAction, 2_000L)
             }
         })
     }
 
     fun stop() {
-        if (billingClient.isReady) billingClient.endConnection()
+        shouldStayConnected = false
+        connecting = false
+        reconnectHandler.removeCallbacks(reconnectAction)
+        billingClient.endConnection()
     }
 
     fun refresh() {
@@ -154,7 +174,7 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
                 return@queryProductDetailsAsync
             }
             products = detailsResult.productDetailsList.mapNotNull { details ->
-                val offer = details.subscriptionOfferDetails?.firstOrNull() ?: return@mapNotNull null
+                val offer = selectOffer(details) ?: return@mapNotNull null
                 val price = offer.pricingPhases.pricingPhaseList.lastOrNull()?.formattedPrice ?: "—"
                 AndroidPlusProduct(
                     productId = details.productId,
@@ -175,6 +195,16 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
                 message = null
             }
         }
+    }
+
+    private fun selectOffer(details: ProductDetails): ProductDetails.SubscriptionOfferDetails? {
+        val offers = details.subscriptionOfferDetails.orEmpty()
+        return offers
+            .filter { it.offerId == null }
+            .minByOrNull { offer -> offer.pricingPhases.pricingPhaseList.lastOrNull()?.priceAmountMicros ?: Long.MAX_VALUE }
+            ?: offers.minByOrNull { offer ->
+                offer.pricingPhases.pricingPhaseList.lastOrNull()?.priceAmountMicros ?: Long.MAX_VALUE
+            }
     }
 
     private fun queryPurchases() {

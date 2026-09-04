@@ -58,6 +58,40 @@ data class OfflineVoiceOption(
     val languageCode: String,
 )
 
+data class ProcessingConfig(
+    val sourceLanguage: SourceLanguageChoice,
+    val targetLanguage: TargetLanguageChoice,
+    val preferredVoiceId: String?,
+    val dubbingMode: DubbingModePreset,
+    val subtitleMode: SubtitleMode,
+)
+
+data class ProcessingConfigRecord(
+    val sourceLanguage: String,
+    val targetLanguage: String,
+    val preferredVoiceId: String?,
+    val dubbingMode: String,
+    val subtitleMode: String,
+)
+
+fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord(
+    sourceLanguage = sourceLanguage.name,
+    targetLanguage = targetLanguage.name,
+    preferredVoiceId = preferredVoiceId,
+    dubbingMode = dubbingMode.name,
+    subtitleMode = subtitleMode.name,
+)
+
+fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
+    ProcessingConfig(
+        sourceLanguage = SourceLanguageChoice.valueOf(sourceLanguage),
+        targetLanguage = TargetLanguageChoice.valueOf(targetLanguage),
+        preferredVoiceId = preferredVoiceId?.takeIf(String::isNotBlank),
+        dubbingMode = DubbingModePreset.valueOf(dubbingMode),
+        subtitleMode = SubtitleMode.valueOf(subtitleMode),
+    )
+}.getOrNull()
+
 object DubbingPreferencePolicy {
     val playbackSpeeds = listOf(0.75f, 1.0f, 1.25f, 1.5f)
 

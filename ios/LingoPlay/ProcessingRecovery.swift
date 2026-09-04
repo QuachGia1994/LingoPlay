@@ -3,6 +3,7 @@ import Foundation
 struct ProcessingRecoveryCheckpoint: Sendable, Equatable {
     let media: LocalMediaItem
     let preparedAudioURL: URL?
+    let config: ProcessingConfig?
 
     var canResumeFromAudio: Bool {
         guard let preparedAudioURL else { return false }
@@ -19,6 +20,11 @@ actor ProcessingRecoveryStore {
         let fileSizeBytes: Int64
         let hasAudioTrack: Bool
         let preparedAudioPath: String?
+        let sourceLanguage: String?
+        let targetLanguage: String?
+        let preferredVoiceIdentifier: String?
+        let dubbingMode: String?
+        let subtitleMode: String?
         let updatedAtEpochMs: Int64
     }
 
@@ -47,11 +53,16 @@ actor ProcessingRecoveryStore {
                 fileSizeBytes: record.fileSizeBytes,
                 hasAudioTrack: record.hasAudioTrack
             ),
-            preparedAudioURL: audio
+            preparedAudioURL: audio,
+            config: config(from: record)
         )
     }
 
-    func save(media: LocalMediaItem, preparedAudioURL: URL? = nil) throws {
+    func save(
+        media: LocalMediaItem,
+        preparedAudioURL: URL? = nil,
+        config: ProcessingConfig? = nil
+    ) throws {
         guard fileManager.fileExists(atPath: media.localURL.path) else { return }
         let record = Record(
             mediaID: media.id,
@@ -61,6 +72,11 @@ actor ProcessingRecoveryStore {
             fileSizeBytes: media.fileSizeBytes,
             hasAudioTrack: media.hasAudioTrack,
             preparedAudioPath: preparedAudioURL.flatMap { fileManager.fileExists(atPath: $0.path) ? $0.path : nil },
+            sourceLanguage: config?.sourceLanguage.rawValue,
+            targetLanguage: config?.targetLanguage.rawValue,
+            preferredVoiceIdentifier: config?.preferredVoiceIdentifier,
+            dubbingMode: config?.dubbingMode.rawValue,
+            subtitleMode: config?.subtitleMode.rawValue,
             updatedAtEpochMs: Int64(Date().timeIntervalSince1970 * 1_000)
         )
         let data = try JSONEncoder().encode(record)
@@ -81,6 +97,23 @@ actor ProcessingRecoveryStore {
     func deleteOwnedImportedMedia(_ media: LocalMediaItem?) {
         guard let media, isOwnedImportedMedia(media.localURL) else { return }
         try? fileManager.removeItem(at: media.localURL)
+    }
+
+    private func config(from record: Record) -> ProcessingConfig? {
+        guard let sourceRaw = record.sourceLanguage,
+              let targetRaw = record.targetLanguage,
+              let modeRaw = record.dubbingMode,
+              let source = SourceLanguageChoice(rawValue: sourceRaw),
+              let target = TargetLanguageChoice(rawValue: targetRaw),
+              let mode = DubbingModePreset(rawValue: modeRaw)
+        else { return nil }
+        return ProcessingConfig(
+            sourceLanguage: source,
+            targetLanguage: target,
+            preferredVoiceIdentifier: record.preferredVoiceIdentifier,
+            dubbingMode: mode,
+            subtitleMode: record.subtitleMode.flatMap(SubtitleMode.init(rawValue:)) ?? .bilingual
+        )
     }
 
     private func checkpointFile() throws -> URL {
