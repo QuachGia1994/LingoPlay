@@ -103,6 +103,16 @@ require("verify_ios_binary.py" in ios_workflow, "iOS CI audits built Mach-O/dSYM
 require("LingoPlay-iOS-dSYM" in ios_workflow, "iOS CI publishes dSYM artifact")
 require("LingoPlay-iOS-release-reports" in ios_workflow, "iOS CI publishes release reports")
 require("compileDebugAndroidTestKotlin" in android_workflow, "Android CI compiles instrumentation tests")
+android_build_spec = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+device_test_key = ROOT / "android/keystores/lingoplay-device-test.p12"
+require(device_test_key.is_file(), "Android stable device-test signing key exists")
+require('applicationIdSuffix = ".debug"' in android_build_spec, "Android Debug installs beside the production package")
+require(
+    'signingConfig = signingConfigs.getByName("deviceTest")' in android_build_spec,
+    "Android Debug uses the stable device-test signing identity",
+)
+require("keytool -genkeypair" not in android_workflow, "Android CI does not rotate the test signing key per run")
+require("keystores/lingoplay-device-test.p12" in android_workflow, "Android CI reuses stable device-test signing")
 require("ORG_GRADLE_PROJECT_LINGOPLAY_TRANSLATION_API_BASE_URL" in android_workflow, "Android CI injects translation backend URL")
 require("LINGOPLAY_TRANSLATION_API_BASE_URL" in ios_workflow, "iOS CI injects translation backend URL")
 require("--translation-base-url" in ios_workflow, "iOS CI verifies endpoint inside built app bundle")

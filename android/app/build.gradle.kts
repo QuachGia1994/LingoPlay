@@ -22,7 +22,21 @@ android {
         }
     }
 
+    signingConfigs {
+        create("deviceTest") {
+            storeFile = file("../keystores/lingoplay-device-test.p12")
+            storePassword = "android"
+            keyAlias = "lingoplay-device-test"
+            keyPassword = "android"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("deviceTest")
+        }
         release {
             isDebuggable = false
             optimization {

@@ -85,14 +85,10 @@ jobs:
 
       - name: Sign installable test APK
         run: |
-          keytool -genkeypair -noprompt \
-            -keystore "$RUNNER_TEMP/lingoplay-ci.jks" \
-            -storepass android -keypass android -alias lingoplay \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=LingoPlay CI,O=LingoPlay,C=VN"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/lingoplay-ci.jks" \
-            --ks-key-alias lingoplay \
+            --ks keystores/lingoplay-device-test.p12 \
+            --ks-type PKCS12 \
+            --ks-key-alias lingoplay-device-test \
             --ks-pass pass:android --key-pass pass:android \
             --out app/build/outputs/apk/release/LingoPlay-release-test.apk \
             app/build/outputs/apk/release/app-release-unsigned.apk
