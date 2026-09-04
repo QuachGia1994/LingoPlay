@@ -25,10 +25,13 @@ class DubbingPreferenceStateTest {
         assertEquals("ja-a", state.preferredVoiceId)
         assertEquals("ja-a", persistence.preferredVoiceId)
 
+        state.cycleTranslationMode()
         state.cycleDubbingMode()
         state.cycleSubtitleMode()
         state.cyclePlaybackSpeed()
 
+        assertEquals(TranslationMode.OFFLINE, state.processingConfig.translationMode)
+        assertEquals(TranslationMode.OFFLINE, persistence.translationMode)
         assertEquals(DubbingModePreset.SPEECH_FOCUS, state.processingConfig.dubbingMode)
         assertEquals(SubtitleMode.TRANSLATED, state.processingConfig.subtitleMode)
         assertEquals("ja-a", state.processingConfig.preferredVoiceId)
@@ -51,6 +54,7 @@ class DubbingPreferenceStateTest {
     private class FakeDubbingPreferencePersistence : DubbingPreferencePersistence {
         override var sourceLanguage = SourceLanguageChoice.AUTO
         override var targetLanguage = TargetLanguageChoice.VIETNAMESE
+        override var translationMode = TranslationMode.CLOUD
         override var dubbingMode = DubbingModePreset.BALANCED
         override var subtitleMode = SubtitleMode.BILINGUAL
         override var playbackSpeed = 1.0f

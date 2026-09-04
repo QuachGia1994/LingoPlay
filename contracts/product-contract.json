@@ -40,6 +40,17 @@
     "modelLicense": "MIT",
     "datasetLicense": "CC-BY-4.0"
   },
+  "offlineTranslation": {
+    "modes": ["cloud", "offline"],
+    "supportedLanguages": ["en", "vi", "ja", "zh"],
+    "builtInLanguages": ["en"],
+    "downloadableLanguages": ["vi", "ja", "zh"],
+    "androidDependency": "com.google.mlkit:translate:17.0.3",
+    "iosPod": "GoogleMLKit/Translate:8.0.0",
+    "explicitModelLifecycle": true,
+    "silentCloudFallback": false,
+    "googleAttributionRequired": true
+  },
   "capabilities": {
     "cleanBackgroundVerified": false,
     "neuralVoiceEmotionEnabled": false,

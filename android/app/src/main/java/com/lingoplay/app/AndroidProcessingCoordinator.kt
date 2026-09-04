@@ -48,6 +48,7 @@ internal interface AndroidProcessingRuntime {
     suspend fun translate(
         transcript: ASRTranscript,
         targetLanguage: String,
+        mode: TranslationMode,
         onProgress: suspend (Int, Int) -> Unit,
     ): TranslationDocument
 
@@ -96,10 +97,12 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
     override suspend fun translate(
         transcript: ASRTranscript,
         targetLanguage: String,
+        mode: TranslationMode,
         onProgress: suspend (Int, Int) -> Unit,
     ): TranslationDocument = TranslationService.translate(
         transcript = transcript,
         targetLanguage = targetLanguage,
+        mode = mode,
         onProgress = onProgress,
     )
 
@@ -170,7 +173,9 @@ internal class AndroidProcessingCoordinator(
         val transcript = transcribe(audioFile, model, config, onEvent)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.ASR, "Speech recognition failed.")
 
-        if (!translationConfigured) return ProcessingOutcome.TranslationEndpointMissing
+        if (config.translationMode == TranslationMode.CLOUD && !translationConfigured) {
+            return ProcessingOutcome.TranslationEndpointMissing
+        }
         val translation = translate(transcript, config, onEvent)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.TRANSLATION, "Translation failed.")
 
@@ -248,7 +253,7 @@ internal class AndroidProcessingCoordinator(
         onEvent: suspend (ProcessingEvent) -> Unit,
     ): TranslationDocument? = try {
         onEvent(ProcessingEvent.TranslationStarted)
-        runtime.translate(transcript, config.targetLanguage.code) { batch, total ->
+        runtime.translate(transcript, config.targetLanguage.code, config.translationMode) { batch, total ->
             onEvent(ProcessingEvent.TranslationProgress(batch, total))
         }.also { document ->
             onEvent(ProcessingEvent.TranslationReady(document))

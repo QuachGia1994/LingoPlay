@@ -57,6 +57,11 @@ struct PlayerView: View {
                     case .translated:
                         VStack(alignment: .leading, spacing: 12) {
                             SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
+                            if model.activeTranslationUsesGoogle {
+                                Text("Powered by Google Translate")
+                                    .font(.caption2)
+                                    .foregroundStyle(LPTheme.secondaryText)
+                            }
                         }
                         .lpCard()
                     case .bilingual:
@@ -64,6 +69,11 @@ struct PlayerView: View {
                             SubtitleLine(language: model.activeSubtitleSourceLanguage, text: model.activeTranslationSegment?.sourceText ?? "—")
                             Divider().overlay(LPTheme.border)
                             SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
+                            if model.activeTranslationUsesGoogle {
+                                Text("Powered by Google Translate")
+                                    .font(.caption2)
+                                    .foregroundStyle(LPTheme.secondaryText)
+                            }
                         }
                         .lpCard()
                     }

@@ -26,6 +26,7 @@ class DubbingPreferencePolicyTest {
             preferredVoiceId = "ja-offline-a",
             dubbingMode = DubbingModePreset.SPEECH_FOCUS,
             subtitleMode = SubtitleMode.TRANSLATED,
+            translationMode = TranslationMode.OFFLINE,
         )
         assertEquals(expected, expected.toRecord().toConfig())
     }

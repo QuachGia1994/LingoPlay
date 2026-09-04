@@ -1,10 +1,10 @@
 # LingoPlay
 
-LingoPlay is a consumer mobile app for translating and dubbing local video on-device. The video/audio media path stays on the phone; the backend receives only small JSON translation requests and entitlement metadata.
+LingoPlay is a consumer mobile app for translating and dubbing local video. Video/audio always stays on the phone. Translation is an explicit choice between transcript-only Cloud requests and optional Google ML Kit on-device models.
 
 ## Current implementation
-- `ios/` — SwiftUI product flow with Photos Picker import, WhisperKit ASR/model acquisition, target-aware offline system TTS plus an optional verified Vietnamese neural voice pack, quality mix/remux/library, durable processing recovery, native AVPlayer PiP, local-only diagnostics, PrivacyInfo.xcprivacy, StoreKit 2 Plus pre-wiring, and release binary/settings audits in macOS CI.
-- `android/` — Jetpack Compose mirror with app-owned Photo Picker import, sherpa-onnx Whisper ASR, resumable/checksummed Whisper Tiny acquisition, silence-aware bounded ASR, target-aware offline system TTS plus an optional verified Vietnamese neural voice pack, normalized/soft-limited local mix, durable recovery, PiP, local-only diagnostics, and Google Play Billing 9.1.0 pre-wiring.
+- `ios/` — SwiftUI product flow with Photos Picker import, WhisperKit ASR/model acquisition, optional ML Kit offline translation through the official pinned CocoaPod, target-aware offline system TTS plus an optional verified Vietnamese neural voice pack, quality mix/remux/library, durable processing recovery, native AVPlayer PiP, local-only diagnostics, PrivacyInfo.xcprivacy, StoreKit 2 Plus pre-wiring, and release binary/settings audits in macOS CI.
+- `android/` — Jetpack Compose mirror with app-owned Photo Picker import, sherpa-onnx Whisper ASR, resumable/checksummed Whisper Tiny acquisition, silence-aware bounded ASR, optional pinned ML Kit offline translation, target-aware offline system TTS plus an optional verified Vietnamese neural voice pack, normalized/soft-limited local mix, durable recovery, PiP, local-only diagnostics, and Google Play Billing 9.1.0 pre-wiring.
 - `backend/` — Cloudflare Worker TypeScript boundary for health, transcript-only translation, and informational entitlement JSON. Media payloads are rejected by design.
 - `docs/` — current product, architecture, and feature source of truth.
 
@@ -19,6 +19,6 @@ This repository does not implement TikTok/YouTube/Douyin scraping, downloading, 
 - Clean Background/source separation is intentionally unavailable in the current build; adaptive soundtrack ducking is not mislabeled as stem separation.
 - Physical Android Stage 8 model-download smoke remains device-dependent; the MEIZU Lucky 08 can be reused when reconnected.
 
-Optional neural-voice dependencies and model attribution are recorded in `THIRD_PARTY_NOTICES.md`.
+Optional neural-voice and offline-translation dependency/attribution details are recorded in `THIRD_PARTY_NOTICES.md`.
 
 See `docs/index.md` for the canonical docs map.

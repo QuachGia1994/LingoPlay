@@ -8,6 +8,7 @@ struct LocalLibraryItem: Identifiable, Codable, Sendable, Equatable {
     let sourceLanguage: String
     let targetLanguage: String
     let dubbingMode: DubbingModePreset?
+    let translationMode: TranslationMode?
     let videoFileName: String
     let segments: [TranslationSegment]
 
@@ -89,6 +90,7 @@ actor LocalLibraryStore {
             sourceLanguage: translation?.sourceLanguage.isEmpty == false ? translation!.sourceLanguage : "und",
             targetLanguage: translation?.targetLanguage.isEmpty == false ? translation!.targetLanguage : "vi",
             dubbingMode: dubbingMode,
+            translationMode: translation?.mode,
             videoFileName: destination.lastPathComponent,
             segments: translation?.segments ?? []
         )

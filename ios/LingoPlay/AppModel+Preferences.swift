@@ -38,6 +38,12 @@ extension AppModel {
         preferredVoiceIdentifier = candidates[(index + 1) % candidates.count]
     }
 
+    func cycleTranslationMode() {
+        let values = TranslationMode.allCases
+        let index = values.firstIndex(of: translationMode) ?? 0
+        translationMode = values[(index + 1) % values.count]
+    }
+
     func cycleDubbingMode() {
         let values = DubbingModePreset.allCases
         let index = values.firstIndex(of: dubbingMode) ?? 0

@@ -138,5 +138,12 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Attribution and upstream disposition are recorded in `THIRD_PARTY_NOTICES.md` and `docs/research/mobile-neural-tts.md`. The pack is not bundled in source, APK, or IPA.
 - Source/build gates are necessary but not sufficient: Stage 17 remains open until MEIZU and iPhone runs verify real audio, real-time factor, memory, thermal behavior, final remux, and export.
 
+## Stage 18 offline-translation boundary
+- Users explicitly select `Cloud` or `Offline`; the immutable processing snapshot, recovery checkpoint, and Library metadata preserve that route. Neither client silently falls back across the privacy boundary.
+- Cloud retains the transcript-only Cloudflare request path. Offline uses Google ML Kit Translation pinned to Android 17.0.3 and the official iOS CocoaPod 8.0.0 for `en`, `vi`, `ja`, and `zh`; media and transcript input/output stay on-device during inference.
+- English support is built in; optional Vietnamese/Japanese/Chinese models are downloaded/deleted only from Settings and checked before inference. Missing source/target models stop with a visible error. Same-language translation is a local identity transform.
+- ML Kit remains proprietary related software and may contact Google for model/runtime updates plus performance/utilization metrics. Settings/About disclose this, and offline translated text is rendered with visible Google Translate attribution.
+- iOS CI generates the Xcode project, installs CocoaPods 1.16.2, resolves `GoogleMLKit/Translate` 8.0.0, and builds/tests the workspace. Source gates reject bypassing the Pods workspace or reintroducing an implicit cloud route.
+
 ## Current stage
 Stages 1–15.7 are implemented, with Stage 16 physical end-to-end evidence still incomplete. Stage 17.1 source integration adds the optional verified Vietnamese neural-voice path without changing the transcript-only backend or local media boundary. Android compilation/unit gates run on Windows; macOS/iOS CI remains the authoritative Swift build gate, and Stage 17 closure still requires physical Android+iPhone neural-output/performance evidence. Home and Library remain backed by real saved outputs; final exported media preserves original soundtrack/BGM/SFX. Clean Background/source separation is intentionally unavailable rather than simulated.

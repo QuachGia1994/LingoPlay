@@ -78,6 +78,13 @@ enum TranslationTextPolicy {
     }
 }
 
+struct TranslationSourceSegment: Identifiable, Sendable, Equatable, Codable {
+    let id: String
+    let startMs: Int
+    let endMs: Int
+    let text: String
+}
+
 struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
     let id: String
     let startMs: Int
@@ -90,6 +97,19 @@ struct TranslationDocument: Sendable, Equatable {
     let sourceLanguage: String
     let targetLanguage: String
     let segments: [TranslationSegment]
+    let mode: TranslationMode
+
+    init(
+        sourceLanguage: String,
+        targetLanguage: String,
+        segments: [TranslationSegment],
+        mode: TranslationMode = .cloud
+    ) {
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.segments = segments
+        self.mode = mode
+    }
 
     var translatedText: String {
         segments.map(\.translatedText).joined(separator: " ")
@@ -122,17 +142,10 @@ enum TranslationError: LocalizedError {
 }
 
 struct TranslationService: Sendable {
-    private struct RequestSegment: Codable {
-        let id: String
-        let startMs: Int
-        let endMs: Int
-        let text: String
-    }
-
     private struct RequestBody: Codable {
         let sourceLanguage: String
         let targetLanguage: String
-        let segments: [RequestSegment]
+        let segments: [TranslationSourceSegment]
     }
 
     private struct ResponseTranslation: Codable {
@@ -202,12 +215,13 @@ struct TranslationService: Sendable {
         return TranslationDocument(
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
-            segments: translated
+            segments: translated,
+            mode: .cloud
         )
     }
 
     private func translateBatch(
-        _ segments: [RequestSegment],
+        _ segments: [TranslationSourceSegment],
         sourceLanguage: String,
         targetLanguage: String,
         endpoint: URL
@@ -234,13 +248,13 @@ struct TranslationService: Sendable {
         return decoded
     }
 
-    private static func makeSourceSegments(_ transcript: ASRTranscript) -> [RequestSegment] {
-        let timed = transcript.segments.enumerated().compactMap { index, segment -> RequestSegment? in
+    static func makeSourceSegments(_ transcript: ASRTranscript) -> [TranslationSourceSegment] {
+        let timed = transcript.segments.enumerated().compactMap { index, segment -> TranslationSourceSegment? in
             let text = TranslationTextPolicy.speechText(segment.text)
             guard !text.isEmpty else { return nil }
             let startMs = max(0, Int((segment.start * 1_000).rounded()))
             let endMs = max(startMs + 1, Int((segment.end * 1_000).rounded()))
-            return RequestSegment(
+            return TranslationSourceSegment(
                 id: "s\(index)",
                 startMs: startMs,
                 endMs: endMs,
@@ -250,12 +264,12 @@ struct TranslationService: Sendable {
         if !timed.isEmpty { return timed }
 
         let fallback = TranslationTextPolicy.speechText(transcript.text)
-        return fallback.isEmpty ? [] : [RequestSegment(id: "s0", startMs: 0, endMs: 1, text: fallback)]
+        return fallback.isEmpty ? [] : [TranslationSourceSegment(id: "s0", startMs: 0, endMs: 1, text: fallback)]
     }
 
-    private static func makeBatches(_ segments: [RequestSegment]) -> [[RequestSegment]] {
-        var result: [[RequestSegment]] = []
-        var current: [RequestSegment] = []
+    static func makeBatches(_ segments: [TranslationSourceSegment]) -> [[TranslationSourceSegment]] {
+        var result: [[TranslationSourceSegment]] = []
+        var current: [TranslationSourceSegment] = []
         var currentChars = 0
 
         for segment in segments {

@@ -212,12 +212,14 @@ internal fun PrepareScreen(
     media: LocalMediaItem?,
     sourceLanguage: SourceLanguageChoice,
     targetLanguage: TargetLanguageChoice,
+    translationMode: TranslationMode,
     voiceLabel: String,
     dubbingMode: DubbingModePreset,
     subtitleMode: SubtitleMode,
     cleanBackgroundAvailable: Boolean,
     onSourceLanguage: () -> Unit,
     onTargetLanguage: () -> Unit,
+    onTranslationMode: () -> Unit,
     onVoice: () -> Unit,
     onDubbingMode: () -> Unit,
     onSubtitleMode: () -> Unit,
@@ -245,6 +247,8 @@ internal fun PrepareScreen(
             PrepareRow(Icons.Rounded.Mic, "From language", sourceLanguage.label, "Whisper language override", onSourceLanguage)
             CardDivider()
             PrepareRow(Icons.Rounded.Language, "To language", targetLanguage.label, "Translation + offline TTS target", onTargetLanguage)
+            CardDivider()
+            PrepareRow(Icons.Rounded.Translate, "Translation mode", translationMode.label, translationMode.detail, onTranslationMode)
             CardDivider()
             PrepareRow(Icons.Rounded.Person, "AI Voice", voiceLabel, "Installed offline voice", onVoice)
             CardDivider()

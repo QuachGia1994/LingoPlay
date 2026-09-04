@@ -29,7 +29,7 @@ class AndroidProcessingCoordinatorTest {
 
             assertTrue(outcome is ProcessingOutcome.Completed)
             assertEquals(
-                listOf("extract", "checkpoint", "model", "asr:en", "translate:ja", "tts:ja-voice", "mix:SPEECH_FOCUS", "save:SPEECH_FOCUS", "clear", "record:processing_completed"),
+                listOf("extract", "checkpoint", "model", "asr:en", "translate:ja:CLOUD", "tts:ja-voice", "mix:SPEECH_FOCUS", "save:SPEECH_FOCUS", "clear", "record:processing_completed"),
                 runtime.calls,
             )
             assertTrue(events.first() is ProcessingEvent.ExtractingAudio)
@@ -93,6 +93,31 @@ class AndroidProcessingCoordinatorTest {
         }
     }
 
+    @Test
+    fun offlineModeDoesNotRequireCloudEndpointAndPreservesRoute() = runBlocking {
+        val root = createTempDirectory("lingoplay-coordinator-").toFile()
+        try {
+            val runtime = FakeRuntime(root)
+            val coordinator = AndroidProcessingCoordinator(runtime, translationConfigured = false)
+            val media = LocalMediaItem(Uri.EMPTY, "sample.mp4", 2_000, 10, true)
+            val config = ProcessingConfig(
+                sourceLanguage = SourceLanguageChoice.ENGLISH,
+                targetLanguage = TargetLanguageChoice.VIETNAMESE,
+                preferredVoiceId = null,
+                dubbingMode = DubbingModePreset.BALANCED,
+                subtitleMode = SubtitleMode.BILINGUAL,
+                translationMode = TranslationMode.OFFLINE,
+            )
+
+            val outcome = coordinator.run(media, reusableAudio = null, config = config) { }
+
+            assertTrue(outcome is ProcessingOutcome.Completed)
+            assertTrue("translate:vi:OFFLINE" in runtime.calls)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private class FakeRuntime(
         private val root: File,
         private val modelFailure: Throwable? = null,
@@ -124,11 +149,12 @@ class AndroidProcessingCoordinatorTest {
         override suspend fun translate(
             transcript: ASRTranscript,
             targetLanguage: String,
+            mode: TranslationMode,
             onProgress: suspend (Int, Int) -> Unit,
         ): TranslationDocument {
-            calls += "translate:$targetLanguage"
+            calls += "translate:$targetLanguage:${mode.name}"
             onProgress(1, 1)
-            return TranslationDocument("en", targetLanguage, listOf(TranslationSegment("s0", 0, 1_000, "hello", "こんにちは")))
+            return TranslationDocument("en", targetLanguage, listOf(TranslationSegment("s0", 0, 1_000, "hello", "こんにちは")), mode)
         }
 
         override suspend fun synthesize(

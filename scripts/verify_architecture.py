@@ -133,6 +133,33 @@ require(
     "iOS translation resolver has production fallback",
 )
 android_translation = (ROOT / "android/app/src/main/java/com/lingoplay/app/Translation.kt").read_text(encoding="utf-8")
+android_offline_translation_path = ROOT / "android/app/src/main/java/com/lingoplay/app/OfflineTranslation.kt"
+ios_offline_translation_path = ROOT / "ios/LingoPlay/OfflineTranslation.swift"
+require(android_offline_translation_path.is_file(), "Android offline translation boundary exists")
+require(ios_offline_translation_path.is_file(), "iOS offline translation boundary exists")
+size_under("android/app/src/main/java/com/lingoplay/app/OfflineTranslation.kt", 32_000)
+size_under("ios/LingoPlay/OfflineTranslation.swift", 32_000)
+android_offline_translation = android_offline_translation_path.read_text(encoding="utf-8")
+ios_offline_translation = ios_offline_translation_path.read_text(encoding="utf-8")
+android_coordinator = (ROOT / "android/app/src/main/java/com/lingoplay/app/AndroidProcessingCoordinator.kt").read_text(encoding="utf-8")
+android_recovery = (ROOT / "android/app/src/main/java/com/lingoplay/app/ProcessingRecovery.kt").read_text(encoding="utf-8")
+ios_recovery = (ROOT / "ios/LingoPlay/ProcessingRecovery.swift").read_text(encoding="utf-8")
+ios_podfile = (ROOT / "ios/Podfile").read_text(encoding="utf-8")
+require('implementation("com.google.mlkit:translate:17.0.3")' in android_build_spec, "Android pins ML Kit Translate")
+require("pod 'GoogleMLKit/Translate', '8.0.0'" in ios_podfile, "iOS pins official ML Kit CocoaPod")
+require("cocoapods -v 1.16.2" in ios_workflow and "pod install" in ios_workflow, "iOS CI pins CocoaPods and installs pods")
+require("-workspace ios/LingoPlay.xcworkspace" in ios_workflow, "iOS CI builds the CocoaPods workspace")
+require("-project ios/LingoPlay.xcodeproj" not in ios_workflow, "iOS CI does not bypass CocoaPods integration")
+require("switch config.translationMode" in ios_model, "iOS translation route is explicit")
+require("config.translationMode == TranslationMode.CLOUD && !translationConfigured" in android_coordinator, "Android cloud endpoint gate is mode-aware")
+for name, source in (("Android", android_offline_translation), ("iOS", ios_offline_translation)):
+    require("will not switch to cloud automatically" in source, f"{name} offline route fails closed")
+    require("TranslationAPIBaseURL" not in source and "HttpURLConnection" not in source, f"{name} offline route has no cloud endpoint")
+    require("downloadedCodes" in source and "missing" in source, f"{name} checks installed models before inference")
+require("translationMode" in android_recovery, "Android recovery preserves translation mode")
+require("translationMode" in ios_recovery, "iOS recovery preserves translation mode")
+require("Powered by Google Translate" in (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPlayProcessingScreen.kt").read_text(encoding="utf-8"), "Android translation output shows Google attribution")
+require("Powered by Google Translate" in (ROOT / "ios/LingoPlay/ProcessingView.swift").read_text(encoding="utf-8"), "iOS translation output shows Google attribution")
 android_tts = (ROOT / "android/app/src/main/java/com/lingoplay/app/TextToSpeech.kt").read_text(encoding="utf-8")
 ios_tts = (ROOT / "ios/LingoPlay/TextToSpeech.swift").read_text(encoding="utf-8")
 for name, source in (("Android", android_translation), ("iOS", translation_source)):
@@ -218,7 +245,7 @@ require("exactVersion: 1.13.7" in project_spec, "iOS pins SherpaOnnx 1.13.7")
 require("exactVersion: 4.9.1" in project_spec, "iOS pins SWCompression 4.9.1")
 require("product: sherpa-onnx" in project_spec, "iOS links sherpa-onnx product")
 require("product: SWCompression" in project_spec, "iOS links SWCompression product")
-require((ROOT / "THIRD_PARTY_NOTICES.md").is_file(), "neural voice attribution exists")
+require((ROOT / "THIRD_PARTY_NOTICES.md").is_file(), "third-party attribution exists")
 require(
     (ROOT / "docs/research/mobile-neural-tts.md").is_file(),
     "neural TTS upstream decision record exists",

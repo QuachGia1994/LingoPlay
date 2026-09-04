@@ -85,6 +85,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.android.billingclient:billing:9.1.0")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     val localSherpaAar = file("libs/sherpa-onnx-1.13.7.aar")

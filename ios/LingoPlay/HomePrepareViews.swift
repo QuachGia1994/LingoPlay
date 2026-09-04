@@ -296,6 +296,8 @@ struct PrepareView: View {
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "character.bubble.fill", title: "To language", value: model.targetLanguageChoice.label, detail: "Translation + offline voice", action: model.cycleTargetLanguage)
                     Divider().overlay(LPTheme.border)
+                    PrepareSetting(icon: "translate", title: "Translation mode", value: model.translationMode.label, detail: model.translationMode.detail, action: model.cycleTranslationMode)
+                    Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "person.wave.2.fill", title: "AI Voice", value: model.preferredVoiceLabel, detail: "Installed offline voice", action: model.cycleVoice)
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "slider.horizontal.3", title: "Dubbing mode", value: model.dubbingMode.label, detail: model.dubbingMode.detail, action: model.cycleDubbingMode)

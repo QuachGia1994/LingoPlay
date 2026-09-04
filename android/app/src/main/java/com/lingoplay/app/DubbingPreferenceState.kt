@@ -16,6 +16,8 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
         private set
     var targetLanguage by mutableStateOf(store.targetLanguage)
         private set
+    var translationMode by mutableStateOf(store.translationMode)
+        private set
     var dubbingMode by mutableStateOf(store.dubbingMode)
         private set
     var subtitleMode by mutableStateOf(store.subtitleMode)
@@ -42,6 +44,7 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
             preferredVoiceId = preferredVoiceId,
             dubbingMode = dubbingMode,
             subtitleMode = subtitleMode,
+            translationMode = translationMode,
         )
 
     fun updateOfflineVoices(voices: List<OfflineVoiceOption>) {
@@ -61,6 +64,10 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
         targetLanguage = targetLanguage.next(availableCodes).also { store.targetLanguage = it }
         preferredVoiceId = null
         store.preferredVoiceId = null
+    }
+
+    fun cycleTranslationMode() {
+        translationMode = translationMode.next().also { store.translationMode = it }
     }
 
     fun cycleDubbingMode() {

@@ -1,0 +1,8 @@
+platform :ios, '17.0'
+
+install! 'cocoapods', :deterministic_uuids => true
+project 'LingoPlay.xcodeproj'
+
+target 'LingoPlay' do
+  pod 'GoogleMLKit/Translate', '8.0.0'
+end

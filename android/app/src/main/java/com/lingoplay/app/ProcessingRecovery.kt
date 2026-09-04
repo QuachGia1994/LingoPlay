@@ -102,6 +102,7 @@ object ProcessingCheckpointStore {
             put("preferredVoiceId", record.preferredVoiceId ?: "")
             put("dubbingMode", record.dubbingMode)
             put("subtitleMode", record.subtitleMode)
+            put("translationMode", record.translationMode)
         }
     }
 
@@ -111,6 +112,7 @@ object ProcessingCheckpointStore {
         preferredVoiceId = json.optString("preferredVoiceId").takeIf(String::isNotBlank),
         dubbingMode = json.getString("dubbingMode"),
         subtitleMode = json.optString("subtitleMode", SubtitleMode.BILINGUAL.name),
+        translationMode = json.optString("translationMode", TranslationMode.CLOUD.name),
     ).toConfig()
 
     private fun checkpointFile(context: Context): File = File(File(context.filesDir, ROOT), FILE_NAME)

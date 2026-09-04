@@ -39,6 +39,29 @@ final class PolicyTests: XCTestCase {
         )
     }
 
+    func testOfflineTranslationRequiresDownloadableModelAndNeverNeedsOneForIdentity() throws {
+        XCTAssertEqual(
+            try OfflineTranslationLanguagePolicy.requiredModelCodes(
+                sourceLanguage: "en-US",
+                targetLanguage: "vi"
+            ),
+            Set(["vi"])
+        )
+        XCTAssertEqual(
+            try OfflineTranslationLanguagePolicy.requiredModelCodes(
+                sourceLanguage: "ja",
+                targetLanguage: "ja"
+            ),
+            []
+        )
+        XCTAssertThrowsError(
+            try OfflineTranslationLanguagePolicy.requiredModelCodes(
+                sourceLanguage: "und",
+                targetLanguage: "vi"
+            )
+        )
+    }
+
     func testDurationOverflowExtendsLocalSpeechWindowWithoutFatalFit() {
         XCTAssertEqual(
             DurationFitPolicy.effectiveEndMs(startMs: 1_000, sourceEndMs: 2_000, speechDurationMs: 1_600),

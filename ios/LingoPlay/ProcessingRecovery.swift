@@ -25,6 +25,7 @@ actor ProcessingRecoveryStore {
         let preferredVoiceIdentifier: String?
         let dubbingMode: String?
         let subtitleMode: String?
+        let translationMode: String?
         let updatedAtEpochMs: Int64
     }
 
@@ -77,6 +78,7 @@ actor ProcessingRecoveryStore {
             preferredVoiceIdentifier: config?.preferredVoiceIdentifier,
             dubbingMode: config?.dubbingMode.rawValue,
             subtitleMode: config?.subtitleMode.rawValue,
+            translationMode: config?.translationMode.rawValue,
             updatedAtEpochMs: Int64(Date().timeIntervalSince1970 * 1_000)
         )
         let data = try JSONEncoder().encode(record)
@@ -112,7 +114,8 @@ actor ProcessingRecoveryStore {
             targetLanguage: target,
             preferredVoiceIdentifier: record.preferredVoiceIdentifier,
             dubbingMode: mode,
-            subtitleMode: record.subtitleMode.flatMap(SubtitleMode.init(rawValue:)) ?? .bilingual
+            subtitleMode: record.subtitleMode.flatMap(SubtitleMode.init(rawValue:)) ?? .bilingual,
+            translationMode: record.translationMode.flatMap(TranslationMode.init(rawValue:)) ?? .cloud
         )
     }
 

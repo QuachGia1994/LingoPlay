@@ -14,6 +14,10 @@ extension AppModel {
         )
     }
 
+    var activeTranslationUsesGoogle: Bool {
+        activeTranslationDocument?.mode == .offline
+    }
+
     var activeSubtitleSourceLanguage: String {
         PlaybackPresentationPolicy.sourceLanguageLabel(
             document: activeTranslationDocument,

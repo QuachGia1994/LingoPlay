@@ -97,6 +97,19 @@ enum SubtitleMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum TranslationMode: String, CaseIterable, Identifiable, Sendable, Codable {
+    case cloud
+    case offline
+
+    var id: String { rawValue }
+    var label: String { self == .cloud ? "Cloud" : "Offline" }
+    var detail: String {
+        self == .cloud
+            ? "Transcript JSON only · Cloudflare Workers AI"
+            : "Google ML Kit models installed on this device"
+    }
+}
+
 struct OfflineVoiceOption: Identifiable, Hashable, Sendable {
     let id: String
     let label: String
@@ -109,6 +122,23 @@ struct ProcessingConfig: Sendable, Equatable {
     let preferredVoiceIdentifier: String?
     let dubbingMode: DubbingModePreset
     let subtitleMode: SubtitleMode
+    let translationMode: TranslationMode
+
+    init(
+        sourceLanguage: SourceLanguageChoice,
+        targetLanguage: TargetLanguageChoice,
+        preferredVoiceIdentifier: String?,
+        dubbingMode: DubbingModePreset,
+        subtitleMode: SubtitleMode,
+        translationMode: TranslationMode = .cloud
+    ) {
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.preferredVoiceIdentifier = preferredVoiceIdentifier
+        self.dubbingMode = dubbingMode
+        self.subtitleMode = subtitleMode
+        self.translationMode = translationMode
+    }
 }
 
 enum DubbingPreferencePolicy {

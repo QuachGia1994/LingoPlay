@@ -83,7 +83,11 @@ struct ProcessingView: View {
                         Text(translation.translatedText)
                             .font(.subheadline)
                             .lineLimit(5)
-                        Text("Only transcript JSON was sent · source media stayed on-device")
+                        Text(
+                            translation.mode == .offline
+                                ? "Powered by Google Translate · transcript stayed on-device"
+                                : "Only transcript JSON was sent · source media stayed on-device"
+                        )
                             .font(.caption2)
                             .foregroundStyle(LPTheme.secondaryText)
                     }

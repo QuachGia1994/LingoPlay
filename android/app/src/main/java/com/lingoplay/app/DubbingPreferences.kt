@@ -52,6 +52,14 @@ enum class SubtitleMode(val label: String) {
     fun next(): SubtitleMode = entries[(ordinal + 1) % entries.size]
 }
 
+enum class TranslationMode(val label: String, val detail: String) {
+    CLOUD("Cloud", "Transcript JSON only · Cloudflare Workers AI"),
+    OFFLINE("Offline", "Google ML Kit models installed on this device"),
+    ;
+
+    fun next(): TranslationMode = entries[(ordinal + 1) % entries.size]
+}
+
 data class OfflineVoiceOption(
     val id: String,
     val label: String,
@@ -64,6 +72,7 @@ data class ProcessingConfig(
     val preferredVoiceId: String?,
     val dubbingMode: DubbingModePreset,
     val subtitleMode: SubtitleMode,
+    val translationMode: TranslationMode = TranslationMode.CLOUD,
 )
 
 data class ProcessingConfigRecord(
@@ -72,6 +81,7 @@ data class ProcessingConfigRecord(
     val preferredVoiceId: String?,
     val dubbingMode: String,
     val subtitleMode: String,
+    val translationMode: String = TranslationMode.CLOUD.name,
 )
 
 fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord(
@@ -80,6 +90,7 @@ fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord
     preferredVoiceId = preferredVoiceId,
     dubbingMode = dubbingMode.name,
     subtitleMode = subtitleMode.name,
+    translationMode = translationMode.name,
 )
 
 fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
@@ -89,6 +100,7 @@ fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
         preferredVoiceId = preferredVoiceId?.takeIf(String::isNotBlank),
         dubbingMode = DubbingModePreset.valueOf(dubbingMode),
         subtitleMode = SubtitleMode.valueOf(subtitleMode),
+        translationMode = TranslationMode.valueOf(translationMode),
     )
 }.getOrNull()
 
@@ -104,6 +116,7 @@ object DubbingPreferencePolicy {
 interface DubbingPreferencePersistence {
     var sourceLanguage: SourceLanguageChoice
     var targetLanguage: TargetLanguageChoice
+    var translationMode: TranslationMode
     var dubbingMode: DubbingModePreset
     var subtitleMode: SubtitleMode
     var playbackSpeed: Float
@@ -120,6 +133,10 @@ class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
     override var targetLanguage: TargetLanguageChoice
         get() = enumValue("target_language", TargetLanguageChoice.VIETNAMESE)
         set(value) = prefs.edit().putString("target_language", value.name).apply()
+
+    override var translationMode: TranslationMode
+        get() = enumValue("translation_mode", TranslationMode.CLOUD)
+        set(value) = prefs.edit().putString("translation_mode", value.name).apply()
 
     override var dubbingMode: DubbingModePreset
         get() = enumValue("dubbing_mode", DubbingModePreset.BALANCED)

@@ -118,23 +118,30 @@ internal fun SettingsScreen(
     wifiOnly: Boolean,
     subtitleMode: SubtitleMode,
     targetLanguage: TargetLanguageChoice,
+    translationMode: TranslationMode,
     voiceLabel: String,
     isPlus: Boolean,
     modelInstallState: ModelInstallState,
     canDeleteModel: Boolean,
     neuralVoiceInstallState: ModelInstallState,
     canDeleteNeuralVoice: Boolean,
+    downloadedTranslationModelCodes: Set<String>,
+    translationModelBusyCode: String?,
+    translationModelError: String?,
+    canManageTranslationModels: Boolean,
     onInstallModel: () -> Unit,
     onCancelModel: () -> Unit,
     onDeleteModel: () -> Unit,
     onInstallNeuralVoice: () -> Unit,
     onCancelNeuralVoice: () -> Unit,
     onDeleteNeuralVoice: () -> Unit,
+    onToggleTranslationModel: (String) -> Unit,
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
     onSubtitleMode: () -> Unit,
     onTargetLanguage: () -> Unit,
+    onTranslationMode: () -> Unit,
     onVoice: () -> Unit,
     onPlus: () -> Unit,
     onAbout: () -> Unit,
@@ -167,6 +174,8 @@ internal fun SettingsScreen(
             CardDivider()
             SettingsValueRow(Icons.Rounded.Language, language.text("Dubbing Language", "Ngôn ngữ lồng tiếng"), targetLanguage.label, onTargetLanguage)
             CardDivider()
+            SettingsValueRow(Icons.Rounded.Translate, language.text("Translation mode", "Chế độ dịch"), translationMode.label, onTranslationMode)
+            CardDivider()
             ToggleRow(Icons.Rounded.Wifi, language.text("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), wifiOnly, onWifiOnlyChange)
             CardDivider()
             SettingsValueRow(Icons.Rounded.Subtitles, language.text("Subtitles", "Phụ đề"), subtitleMode.label, onSubtitleMode)
@@ -177,9 +186,48 @@ internal fun SettingsScreen(
                 Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpCyan)
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(language.text("Private by architecture", "Riêng tư ngay từ kiến trúc"), fontWeight = FontWeight.Bold)
-                    Text(language.text("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.", "Video và audio không bao giờ đi tới backend LingoPlay. Chỉ văn bản transcript cần cho dịch thuật được gửi dưới dạng JSON gọn khi bật dịch online."), color = LpSecondaryText, fontSize = 13.sp)
+                    Text(language.text("Cloud mode sends transcript JSON only to LingoPlay. Offline mode keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Chế độ Cloud chỉ gửi transcript JSON tới LingoPlay. Chế độ Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."), color = LpSecondaryText, fontSize = 13.sp)
                 }
             }
+        }
+
+        LpCard {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Rounded.Translate, contentDescription = null, tint = LpCyan, modifier = Modifier.size(21.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(language.text("Offline Translation Models", "Model dịch Offline"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(language.text("Explicit install/delete · about 30 MB per language", "Cài/xóa thủ công · khoảng 30 MB mỗi ngôn ngữ"), color = LpSecondaryText, fontSize = 11.sp)
+                }
+            }
+            OfflineTranslationLanguagePolicy.supportedCodes.forEach { code ->
+                CardDivider()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(OfflineTranslationLanguagePolicy.displayName(code), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            when {
+                                code == "en" -> language.text("Built in", "Tích hợp sẵn")
+                                translationModelBusyCode == code -> language.text("Working…", "Đang xử lý…")
+                                code in downloadedTranslationModelCodes -> language.text("Installed", "Đã cài")
+                                else -> language.text("Not installed", "Chưa cài")
+                            },
+                            color = LpSecondaryText,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    if (code != "en") {
+                        TextButton(
+                            enabled = canManageTranslationModels && translationModelBusyCode == null,
+                            onClick = { onToggleTranslationModel(code) },
+                        ) {
+                            Text(if (code in downloadedTranslationModelCodes) language.text("Delete", "Xóa") else language.text("Install", "Cài"))
+                        }
+                    }
+                }
+            }
+            translationModelError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
+            Text("Powered by Google Translate · ML Kit", color = LpSecondaryText, fontSize = 10.sp)
+            Text(language.text("Missing models stop the job; LingoPlay never switches to cloud automatically.", "Thiếu model sẽ dừng tác vụ; LingoPlay không tự chuyển sang cloud."), color = LpSecondaryText, fontSize = 10.sp)
         }
 
         LpCard {

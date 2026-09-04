@@ -23,6 +23,7 @@ data class LocalLibraryItem(
     val dubbingMode: DubbingModePreset?,
     val videoFile: File,
     val segments: List<TranslationSegment>,
+    val translationMode: TranslationMode = TranslationMode.CLOUD,
 ) {
     val languagePair: String
         get() = "${sourceLanguage.uppercase()} → ${targetLanguage.uppercase()}"
@@ -34,7 +35,7 @@ data class LocalLibraryItem(
 
     fun asTranslationDocument(): TranslationDocument? = segments
         .takeIf { it.isNotEmpty() }
-        ?.let { TranslationDocument(sourceLanguage, targetLanguage, it) }
+        ?.let { TranslationDocument(sourceLanguage, targetLanguage, it, translationMode) }
 }
 
 object LocalLibraryStore {
@@ -81,6 +82,7 @@ object LocalLibraryStore {
                 dubbingMode = dubbingMode,
                 videoFile = destination,
                 segments = translation?.segments.orEmpty(),
+                translationMode = translation?.mode ?: TranslationMode.CLOUD,
             )
             File(directory, METADATA_NAME).writeText(item.toJson().toString(), Charsets.UTF_8)
             success = true
@@ -155,6 +157,10 @@ object LocalLibraryStore {
             },
             videoFile = video,
             segments = segments,
+            translationMode = json.optString("translationMode")
+                .takeIf(String::isNotBlank)
+                ?.let { value -> runCatching { TranslationMode.valueOf(value) }.getOrNull() }
+                ?: TranslationMode.CLOUD,
         )
     }.getOrNull()
 
@@ -166,6 +172,7 @@ object LocalLibraryStore {
         put("sourceLanguage", sourceLanguage)
         put("targetLanguage", targetLanguage)
         dubbingMode?.let { put("dubbingMode", it.name) }
+        put("translationMode", translationMode.name)
         put("segments", JSONArray().apply {
             segments.forEach { segment ->
                 put(JSONObject().apply {

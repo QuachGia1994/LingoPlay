@@ -196,7 +196,15 @@ internal fun ProcessingScreen(
                     Text("${translation.segments.size} segments", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(translation.translatedText, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
-                Text("Only transcript JSON was sent · source media stayed on-device", color = LpSecondaryText, fontSize = 10.sp)
+                Text(
+                    if (translation.mode == TranslationMode.OFFLINE) {
+                        "Powered by Google Translate · transcript stayed on-device"
+                    } else {
+                        "Only transcript JSON was sent · source media stayed on-device"
+                    },
+                    color = LpSecondaryText,
+                    fontSize = 10.sp,
+                )
             }
         }
 

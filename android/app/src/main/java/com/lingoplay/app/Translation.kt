@@ -28,6 +28,7 @@ data class TranslationDocument(
     val sourceLanguage: String,
     val targetLanguage: String,
     val segments: List<TranslationSegment>,
+    val mode: TranslationMode = TranslationMode.CLOUD,
 ) {
     val translatedText: String get() = segments.joinToString(" ") { it.translatedText }
 }
@@ -120,8 +121,11 @@ object TranslationService {
         transcript: ASRTranscript,
         targetLanguage: String = "vi",
         endpointBaseUrl: String = BuildConfig.TRANSLATION_API_BASE_URL,
+        mode: TranslationMode = TranslationMode.CLOUD,
         onProgress: suspend (batch: Int, total: Int) -> Unit = { _, _ -> },
-    ): TranslationDocument = withContext(Dispatchers.IO) {
+    ): TranslationDocument = if (mode == TranslationMode.OFFLINE) {
+        OfflineTranslationService.translate(transcript, targetLanguage, onProgress)
+    } else withContext(Dispatchers.IO) {
         val endpoint = endpointBaseUrl.trim().trimEnd('/')
         if (endpoint.isEmpty()) throw IllegalStateException("Translation backend is not configured.")
 
@@ -142,7 +146,7 @@ object TranslationService {
             check(text.isNotEmpty()) { "Translation backend returned an incomplete response." }
             TranslationSegment(source.id, source.startMs, source.endMs, source.text, text)
         }
-        TranslationDocument(sourceLanguage, targetLanguage, translatedSegments)
+        TranslationDocument(sourceLanguage, targetLanguage, translatedSegments, TranslationMode.CLOUD)
     }
 
     private fun postBatch(

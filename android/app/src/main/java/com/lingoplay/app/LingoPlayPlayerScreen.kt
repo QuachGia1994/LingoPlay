@@ -334,11 +334,17 @@ private fun SingleClockDubPlayer(
         SubtitleMode.OFF -> Unit
         SubtitleMode.TRANSLATED -> LpCard {
             SubtitleRow(translation?.targetLanguage?.uppercase() ?: "TR", activeSegment?.translatedText ?: "—")
+            if (translation?.mode == TranslationMode.OFFLINE) {
+                Text("Powered by Google Translate", color = LpSecondaryText, fontSize = 9.sp)
+            }
         }
         SubtitleMode.BILINGUAL -> LpCard {
             SubtitleRow(translation?.sourceLanguage?.uppercase() ?: "SRC", activeSegment?.sourceText ?: "—")
             CardDivider()
             SubtitleRow(translation?.targetLanguage?.uppercase() ?: "TR", activeSegment?.translatedText ?: "—")
+            if (translation?.mode == TranslationMode.OFFLINE) {
+                Text("Powered by Google Translate", color = LpSecondaryText, fontSize = 9.sp)
+            }
         }
     }
 }

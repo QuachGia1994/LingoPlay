@@ -54,6 +54,9 @@ final class AppModel {
             }
         }
     }
+    var translationMode = TranslationMode(rawValue: UserDefaults.standard.string(forKey: "lingoplay.translationMode") ?? "cloud") ?? .cloud {
+        didSet { UserDefaults.standard.set(translationMode.rawValue, forKey: "lingoplay.translationMode") }
+    }
     var dubbingMode = DubbingModePreset(rawValue: UserDefaults.standard.string(forKey: "lingoplay.dubbingMode") ?? "balanced") ?? .balanced {
         didSet { UserDefaults.standard.set(dubbingMode.rawValue, forKey: "lingoplay.dubbingMode") }
     }
@@ -77,6 +80,9 @@ final class AppModel {
     var mixState: MixState = .idle
     var modelInstallState: ASRModelInstallState = .notInstalled
     var neuralVoiceInstallState: ASRModelInstallState = .notInstalled
+    var downloadedTranslationModelCodes: Set<String> = []
+    var translationModelBusyCode: String?
+    var translationModelError: String?
     var plusPresented = false
     var aboutPresented = false
     var pendingRecovery: ProcessingRecoveryCheckpoint?
@@ -100,6 +106,8 @@ final class AppModel {
     let neuralVoiceInstaller = NeuralVoicePackInstaller()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     private let translationService = TranslationService()
+    let offlineTranslationModelManager = OfflineTranslationModelManager()
+    private let offlineTranslationService = OfflineTranslationService()
     private let ttsService = OfflineDubbingTTSService()
     private let timelineMixService = TimelineMixService()
     private let libraryStore = LocalLibraryStore()
@@ -117,6 +125,7 @@ final class AppModel {
         Task {
             await refreshLibrary()
             await refreshModelState()
+            refreshOfflineTranslationModels()
             pendingRecovery = await processingRecoveryStore.load()
             if pendingRecovery != nil { await diagnostics.record("recovery_available") }
         }
@@ -232,20 +241,32 @@ final class AppModel {
     }
 
     private func translateTranscript(_ transcript: ASRTranscript, config: ProcessingConfig) async {
-        guard let endpoint = translationEndpoint() else {
-            translationState = .endpointMissing
-            return
+        let updateProgress: @MainActor @Sendable (Int, Int) -> Void = { [weak self] item, total in
+            self?.translationState = .translating(batch: item, totalBatches: total)
+            let ratio = total > 0 ? Double(item) / Double(total) : 0
+            self?.processingProgress = 0.4 + (0.2 * ratio)
         }
 
         do {
-            let document = try await translationService.translate(
-                transcript: transcript,
-                targetLanguage: config.targetLanguage.code,
-                endpoint: endpoint
-            ) { [weak self] batch, total in
-                self?.translationState = .translating(batch: batch, totalBatches: total)
-                let ratio = total > 0 ? Double(batch) / Double(total) : 0
-                self?.processingProgress = 0.4 + (0.2 * ratio)
+            let document: TranslationDocument
+            switch config.translationMode {
+            case .cloud:
+                guard let endpoint = translationEndpoint() else {
+                    translationState = .endpointMissing
+                    return
+                }
+                document = try await translationService.translate(
+                    transcript: transcript,
+                    targetLanguage: config.targetLanguage.code,
+                    endpoint: endpoint,
+                    progress: updateProgress
+                )
+            case .offline:
+                document = try await offlineTranslationService.translate(
+                    transcript: transcript,
+                    targetLanguage: config.targetLanguage.code,
+                    progress: updateProgress
+                )
             }
             translationState = .completed(document)
             processingProgress = 0.6
@@ -459,7 +480,8 @@ final class AppModel {
                 TranslationDocument(
                     sourceLanguage: item.sourceLanguage,
                     targetLanguage: item.targetLanguage,
-                    segments: item.segments
+                    segments: item.segments,
+                    mode: item.translationMode ?? .cloud
                 )
             )
         }
@@ -598,7 +620,8 @@ final class AppModel {
             targetLanguage: targetLanguageChoice,
             preferredVoiceIdentifier: preferredVoiceIdentifier,
             dubbingMode: dubbingMode,
-            subtitleMode: subtitleMode
+            subtitleMode: subtitleMode,
+            translationMode: translationMode
         )
     }
 

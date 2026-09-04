@@ -1,6 +1,22 @@
 # Third-party notices
 
-LingoPlay includes or downloads the following third-party components for its optional offline Vietnamese Neural Voice feature.
+LingoPlay includes or downloads the following third-party components for optional offline neural voice and translation features.
+
+## Google ML Kit Translation
+
+LingoPlay optionally integrates Google ML Kit Translation as proprietary related software under the Google APIs Terms of Service and the ML Kit Terms. Android pins `com.google.mlkit:translate:17.0.3`; iOS pins the official `GoogleMLKit/Translate` CocoaPod 8.0.0.
+
+ML Kit translation input and output text is processed on-device. The SDK may still contact Google to download or update language models/runtime components and may send performance/utilization metrics as described by Google. Users explicitly install/delete language models and explicitly select Offline mode; LingoPlay does not silently fall back from Offline to Cloud.
+
+Product and terms: https://developers.google.com/ml-kit/language/translation
+
+ML Kit terms: https://developers.google.com/ml-kit/terms
+
+Translation terms: https://developers.google.com/ml-kit/language/translation/translation-terms
+
+Attribution requirements: https://docs.cloud.google.com/translate/attribution
+
+Translated output produced by this optional path is labeled “Powered by Google Translate.” Google and Google Translate are trademarks of Google LLC. No endorsement is implied.
 
 ## sherpa-onnx
 

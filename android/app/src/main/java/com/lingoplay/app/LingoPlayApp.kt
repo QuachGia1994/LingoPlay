@@ -157,6 +157,7 @@ fun LingoPlayApp() {
     var activeProcessingConfig by remember { mutableStateOf<ProcessingConfig?>(null) }
     val sourceLanguage = dubbingState.sourceLanguage
     val targetLanguage = dubbingState.targetLanguage
+    val translationMode = dubbingState.translationMode
     val dubbingMode = dubbingState.dubbingMode
     val subtitleMode = dubbingState.subtitleMode
     val playbackSpeed = dubbingState.playbackSpeed
@@ -164,6 +165,7 @@ fun LingoPlayApp() {
     val currentProcessingConfig = dubbingState.processingConfig
     val cycleSourceLanguage: () -> Unit = dubbingState::cycleSourceLanguage
     val cycleTargetLanguage: () -> Unit = dubbingState::cycleTargetLanguage
+    val cycleTranslationMode: () -> Unit = dubbingState::cycleTranslationMode
     val cycleDubbingMode: () -> Unit = dubbingState::cycleDubbingMode
     val cycleSubtitleMode: () -> Unit = dubbingState::cycleSubtitleMode
     val cycleVoice: () -> Unit = dubbingState::cycleVoice
@@ -175,6 +177,10 @@ fun LingoPlayApp() {
     var modelInstallJob by remember { mutableStateOf<Job?>(null) }
     var neuralVoiceInstallState by remember { mutableStateOf<ModelInstallState>(NeuralVoicePackInstaller.state(context)) }
     var neuralVoiceInstallJob by remember { mutableStateOf<Job?>(null) }
+    var downloadedTranslationModelCodes by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var translationModelBusyCode by remember { mutableStateOf<String?>(null) }
+    var translationModelError by remember { mutableStateOf<String?>(null) }
+    var translationModelJob by remember { mutableStateOf<Job?>(null) }
     var uiLanguageName by rememberSaveable {
         mutableStateOf(uiPreferences.getString("ui_language", UiLanguage.ENGLISH.name) ?: UiLanguage.ENGLISH.name)
     }
@@ -270,6 +276,33 @@ fun LingoPlayApp() {
         }
     }
 
+    val toggleTranslationModel: (String) -> Unit = { code ->
+        if (translationModelJob == null && translationPhaseName != TranslationPhase.TRANSLATING.name) {
+            translationModelBusyCode = code
+            translationModelError = null
+            translationModelJob = scope.launch {
+                try {
+                    if (code in downloadedTranslationModelCodes) {
+                        OfflineTranslationModelManager.delete(code)
+                    } else {
+                        OfflineTranslationModelManager.download(code, wifiOnly)
+                    }
+                    downloadedTranslationModelCodes = OfflineTranslationModelManager.downloadedCodes()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    translationModelError = error.message ?: "Unable to update the offline translation model."
+                    downloadedTranslationModelCodes = runCatching {
+                        OfflineTranslationModelManager.downloadedCodes()
+                    }.getOrDefault(downloadedTranslationModelCodes)
+                } finally {
+                    translationModelBusyCode = null
+                    translationModelJob = null
+                }
+            }
+        }
+    }
+
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
@@ -325,6 +358,11 @@ fun LingoPlayApp() {
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
         refreshVoiceOptions()
+        try {
+            downloadedTranslationModelCodes = OfflineTranslationModelManager.downloadedCodes()
+        } catch (error: Throwable) {
+            translationModelError = error.message ?: "Unable to inspect offline translation models."
+        }
         if (pendingRecovery != null) LocalDiagnostics.record(context, "recovery_available")
         if (stageName == Stage.SPLASH.name) {
             delay(900)
@@ -509,12 +547,14 @@ fun LingoPlayApp() {
                         media = selectedMedia,
                         sourceLanguage = sourceLanguage,
                         targetLanguage = targetLanguage,
+                        translationMode = translationMode,
                         voiceLabel = preferredVoiceLabel,
                         dubbingMode = dubbingMode,
                         subtitleMode = subtitleMode,
                         cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
                         onSourceLanguage = cycleSourceLanguage,
                         onTargetLanguage = cycleTargetLanguage,
+                        onTranslationMode = cycleTranslationMode,
                         onVoice = cycleVoice,
                         onDubbingMode = cycleDubbingMode,
                         onSubtitleMode = cycleSubtitleMode,
@@ -667,18 +707,24 @@ fun LingoPlayApp() {
                             wifiOnly = wifiOnly,
                             subtitleMode = subtitleMode,
                             targetLanguage = targetLanguage,
+                            translationMode = translationMode,
                             voiceLabel = preferredVoiceLabel,
                             isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
                             canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
                             neuralVoiceInstallState = neuralVoiceInstallState,
                             canDeleteNeuralVoice = ttsPhase != TTSPhase.SYNTHESIZING,
+                            downloadedTranslationModelCodes = downloadedTranslationModelCodes,
+                            translationModelBusyCode = translationModelBusyCode,
+                            translationModelError = translationModelError,
+                            canManageTranslationModels = translationPhase != TranslationPhase.TRANSLATING,
                             onInstallModel = startModelInstall,
                             onCancelModel = cancelModelInstall,
                             onDeleteModel = deleteModel,
                             onInstallNeuralVoice = startNeuralVoiceInstall,
                             onCancelNeuralVoice = cancelNeuralVoiceInstall,
                             onDeleteNeuralVoice = deleteNeuralVoice,
+                            onToggleTranslationModel = toggleTranslationModel,
                             onToggleAppearance = {
                                 highContrast = !highContrast
                                 uiPreferences.edit { putBoolean("high_contrast", highContrast) }
@@ -694,6 +740,7 @@ fun LingoPlayApp() {
                             },
                             onSubtitleMode = cycleSubtitleMode,
                             onTargetLanguage = cycleTargetLanguage,
+                            onTranslationMode = cycleTranslationMode,
                             onVoice = cycleVoice,
                             onPlus = { stageName = Stage.PLUS.name },
                             onAbout = { stageName = Stage.ABOUT.name },

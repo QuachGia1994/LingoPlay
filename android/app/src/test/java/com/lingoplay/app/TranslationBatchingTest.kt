@@ -56,6 +56,12 @@ class TranslationBatchingTest {
     }
 
     @Test
+    fun `offline route requires downloadable models without cloud fallback`() {
+        assertEquals(setOf("vi"), OfflineTranslationLanguagePolicy.requiredModelCodes("en-US", "vi"))
+        assertEquals(emptySet<String>(), OfflineTranslationLanguagePolicy.requiredModelCodes("ja", "ja"))
+    }
+
+    @Test
     fun `batching stays below segment and character ceilings`() {
         val segments = (0 until 205).map { index ->
             TranslationSourceSegment("s$index", index * 1000, (index + 1) * 1000, "x".repeat(120))

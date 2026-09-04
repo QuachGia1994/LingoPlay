@@ -7,9 +7,24 @@ import argparse
 from pathlib import Path
 
 
-def parse_settings(text: str) -> dict[str, str]:
+def parse_settings(text: str, target: str = "LingoPlay") -> dict[str, str]:
+    lines = text.splitlines()
+    header = f"Build settings for action build and target {target}:"
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == header) + 1
+    except StopIteration as error:
+        raise SystemExit(f"FAIL iOS build settings: missing target block {target!r}") from error
+
+    end = next(
+        (
+            index
+            for index in range(start, len(lines))
+            if lines[index].strip().startswith("Build settings for action build and target ")
+        ),
+        len(lines),
+    )
     result: dict[str, str] = {}
-    for raw in text.splitlines():
+    for raw in lines[start:end]:
         line = raw.strip()
         if " = " not in line:
             continue

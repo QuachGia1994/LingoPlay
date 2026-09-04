@@ -111,6 +111,11 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
+                    Button(action: model.cycleTranslationMode) {
+                        SettingsValueRow(icon: "translate", title: model.uiText("Translation mode", "Chế độ dịch"), value: model.translationMode.label)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.wifiOnly) {
                         Label(model.uiText("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), systemImage: "wifi")
                     }
@@ -127,11 +132,13 @@ struct SettingsView: View {
                     Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
                         .font(.headline)
                         .foregroundStyle(LPTheme.accent)
-                    Text(model.uiText("Video and audio never go to the LingoPlay backend. Only transcript text required for translation is sent as compact JSON when online translation is enabled.", "Video và audio không bao giờ đi tới backend LingoPlay. Chỉ văn bản transcript cần cho dịch thuật được gửi dưới dạng JSON gọn khi bật dịch online."))
+                    Text(model.uiText("Cloud mode sends transcript JSON only to LingoPlay. Offline mode keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Chế độ Cloud chỉ gửi transcript JSON tới LingoPlay. Chế độ Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."))
                         .font(.subheadline)
                         .foregroundStyle(LPTheme.secondaryText)
                 }
                 .lpCard()
+
+                OfflineTranslationModelManagementCard(model: model)
 
                 SpeechModelManagementCard(model: model)
 
@@ -298,8 +305,14 @@ struct AboutView: View {
                         Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
                             .font(.headline)
                             .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Video/audio stay on-device. Only transcript JSON is eligible for translation requests.", "Video/audio luôn ở trên thiết bị. Chỉ transcript JSON có thể được gửi để dịch."))
+                        Text(model.uiText("Video/audio stay on-device. Only transcript JSON is eligible for Cloud translation requests.", "Video/audio luôn ở trên thiết bị. Chỉ transcript JSON có thể được gửi khi dịch Cloud."))
                             .font(.subheadline)
+                            .foregroundStyle(LPTheme.secondaryText)
+                        Text(model.uiText("Offline translation input/output stays on-device. ML Kit may contact Google for models, updates, and performance/utilization metrics.", "Nội dung vào/ra của dịch Offline ở lại trên thiết bị. ML Kit có thể kết nối Google để tải model, cập nhật và gửi chỉ số hiệu năng/mức sử dụng."))
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                        Text("Powered by Google Translate · ML Kit")
+                            .font(.caption2)
                             .foregroundStyle(LPTheme.secondaryText)
                         Divider().overlay(LPTheme.border)
                         Text("Clean Background: \(CleanBackgroundCapability.isAvailable ? "Ready" : "Unavailable")")
@@ -318,6 +331,74 @@ struct AboutView: View {
             }
         }
         .task { diagnosticsCount = await model.localDiagnosticsCount() }
+    }
+}
+
+struct OfflineTranslationModelManagementCard: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(model.uiText("Offline Translation Models", "Model dịch Offline"), systemImage: "translate")
+                .font(.headline)
+                .foregroundStyle(LPTheme.accent)
+            Text(model.uiText("English support is built in. Install or delete Vietnamese, Japanese, and Chinese explicitly; each downloadable model is about 30 MB.", "Tiếng Anh được tích hợp sẵn. Cài hoặc xóa thủ công model tiếng Việt, Nhật và Trung; mỗi model tải về khoảng 30 MB."))
+                .font(.caption)
+                .foregroundStyle(LPTheme.secondaryText)
+
+            ForEach(OfflineTranslationLanguagePolicy.supportedCodes, id: \.self) { code in
+                Divider().overlay(LPTheme.border)
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(OfflineTranslationLanguagePolicy.displayName(code))
+                            .font(.subheadline.weight(.semibold))
+                        Text(status(for: code))
+                            .font(.caption2)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    Spacer()
+                    if code == "en" {
+                        Text(model.uiText("Built in", "Tích hợp sẵn"))
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    } else if model.translationModelBusyCode == code {
+                        ProgressView()
+                            .tint(LPTheme.cyan)
+                    } else {
+                        Button(model.downloadedTranslationModelCodes.contains(code) ? model.uiText("Delete", "Xóa") : model.uiText("Install", "Cài")) {
+                            model.toggleOfflineTranslationModel(code)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.canManageOfflineTranslationModels)
+                    }
+                }
+            }
+
+            if let error = model.translationModelError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Text("Powered by Google Translate · ML Kit")
+                .font(.caption2)
+                .foregroundStyle(LPTheme.secondaryText)
+            Text(model.uiText("Missing models stop the job; LingoPlay never switches to cloud automatically.", "Thiếu model sẽ dừng tác vụ; LingoPlay không tự chuyển sang cloud."))
+                .font(.caption2)
+                .foregroundStyle(LPTheme.secondaryText)
+        }
+        .lpCard()
+    }
+
+    private func status(for code: String) -> String {
+        if code == "en" {
+            return model.uiText("Built-in pivot language", "Ngôn ngữ trung gian tích hợp sẵn")
+        }
+        if model.translationModelBusyCode == code {
+            return model.uiText("Working…", "Đang xử lý…")
+        }
+        return model.downloadedTranslationModelCodes.contains(code)
+            ? model.uiText("Installed", "Đã cài")
+            : model.uiText("Not installed", "Chưa cài")
     }
 }
 

@@ -21,6 +21,10 @@ ANDROID_SETTINGS = (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPla
 IOS_NEURAL_ACQUISITION = (ROOT / "ios/LingoPlay/NeuralVoiceAcquisition.swift").read_text(encoding="utf-8")
 IOS_NEURAL_RUNTIME = (ROOT / "ios/LingoPlay/NeuralTextToSpeech.swift").read_text(encoding="utf-8")
 IOS_SETTINGS = (ROOT / "ios/LingoPlay/LibrarySettingsViews.swift").read_text(encoding="utf-8")
+ANDROID_OFFLINE_TRANSLATION = (ROOT / "android/app/src/main/java/com/lingoplay/app/OfflineTranslation.kt").read_text(encoding="utf-8")
+IOS_OFFLINE_TRANSLATION = (ROOT / "ios/LingoPlay/OfflineTranslation.swift").read_text(encoding="utf-8")
+ANDROID_BUILD = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+IOS_PODFILE = (ROOT / "ios/Podfile").read_text(encoding="utf-8")
 
 
 def require(condition: bool, label: str) -> None:
@@ -78,6 +82,31 @@ android_speeds = ", ".join(f"{value}f" for value in speeds)
 ios_speeds = ", ".join(str(value) for value in speeds)
 require(f"listOf({android_speeds})" in ANDROID_PREFS, "Android playback speeds")
 require(f"[{ios_speeds}]" in IOS_PREFS, "iOS playback speeds")
+
+offline_translation = CONTRACT["offlineTranslation"]
+require(offline_translation["modes"] == ["cloud", "offline"], "translation modes remain explicit")
+require(
+    set(offline_translation["supportedLanguages"]) == set(target)
+    and len(offline_translation["supportedLanguages"]) == len(target),
+    "offline translation language parity",
+)
+require(offline_translation["builtInLanguages"] == ["en"], "English remains the built-in translation language")
+require(offline_translation["downloadableLanguages"] == ["vi", "ja", "zh"], "downloadable translation language order")
+require(offline_translation["explicitModelLifecycle"] is True, "offline models require explicit lifecycle")
+require(offline_translation["silentCloudFallback"] is False, "offline translation forbids silent cloud fallback")
+require('implementation("com.google.mlkit:translate:17.0.3")' in ANDROID_BUILD, "Android pins ML Kit Translate 17.0.3")
+require("pod 'GoogleMLKit/Translate', '8.0.0'" in IOS_PODFILE, "iOS pins official ML Kit Translate pod 8.0.0")
+for code in offline_translation["supportedLanguages"]:
+    require(f'"{code}"' in ANDROID_OFFLINE_TRANSLATION, f"Android offline translation language {code}")
+    require(f'"{code}"' in IOS_OFFLINE_TRANSLATION, f"iOS offline translation language {code}")
+require('code == "en" || downloaded.contains' in ANDROID_OFFLINE_TRANSLATION, "Android treats English as built in")
+require('require(code != "en")' in ANDROID_OFFLINE_TRANSLATION, "Android never manages English as a remote model")
+require('var result: Set<String> = ["en"]' in IOS_OFFLINE_TRANSLATION, "iOS treats English as built in")
+require('guard normalizedCode != "en"' in IOS_OFFLINE_TRANSLATION, "iOS never creates an English remote model")
+for name, source in (("Android", ANDROID_OFFLINE_TRANSLATION), ("iOS", IOS_OFFLINE_TRANSLATION)):
+    require("will not switch to cloud automatically" in source, f"{name} missing-model error forbids fallback")
+require("Powered by Google Translate" in ANDROID_SETTINGS, "Android shows Google Translate attribution")
+require("Powered by Google Translate" in IOS_SETTINGS, "iOS shows Google Translate attribution")
 
 mode_names = {
     "balanced": ("BALANCED", "balanced"),
