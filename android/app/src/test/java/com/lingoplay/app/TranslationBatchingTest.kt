@@ -6,6 +6,37 @@ import org.junit.Test
 
 class TranslationBatchingTest {
     @Test
+    fun `translation text removes whisper controls and non speech cues`() {
+        val cleaned = TranslationTextPolicy.speechText(
+            "<|startoftranscript|><transcribe><0.00>[Music] We have to shut it down. <12.00>",
+        )
+
+        assertEquals("We have to shut it down.", cleaned)
+    }
+
+    @Test
+    fun `strong English evidence corrects wrong Thai auto detection`() {
+        val language = TranslationTextPolicy.sourceLanguage(
+            reported = "th",
+            text = "We have to shut it down. Please tell me how you can do this.",
+        )
+
+        assertEquals("en", language)
+        assertEquals("th", TranslationTextPolicy.sourceLanguage("th", "สวัสดีครับ วันนี้อากาศดีมาก"))
+    }
+
+    @Test
+    fun `non speech only segments are omitted`() {
+        val transcript = ASRTranscript(
+            language = "en",
+            text = "[Music]",
+            segments = listOf(ASRSegment(0, 0f, 2f, "[Music]")),
+        )
+
+        assertTrue(TranslationBatching.fromTranscript(transcript).isEmpty())
+    }
+
+    @Test
     fun `transcript segments preserve timing and stable ids`() {
         val transcript = ASRTranscript(
             language = "en",

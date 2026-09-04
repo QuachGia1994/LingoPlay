@@ -28,6 +28,56 @@ enum TranslationEndpointConfiguration {
     }
 }
 
+enum TranslationTextPolicy {
+    private static let commonEnglishWords: Set<String> = [
+        "a", "and", "are", "can", "do", "have", "how", "i", "in", "is", "it",
+        "me", "of", "please", "that", "the", "this", "to", "we", "what", "you",
+    ]
+
+    static func speechText(_ text: String) -> String {
+        let withoutAngles = text.replacingOccurrences(
+            of: "<[^>\\r\\n]{1,96}>",
+            with: " ",
+            options: .regularExpression
+        )
+        let withoutCues = withoutAngles.replacingOccurrences(
+            of: "\\[[^\\r\\n\\]]{1,96}\\]",
+            with: " ",
+            options: .regularExpression
+        )
+        return withoutCues
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func sourceLanguage(reported: String, text: String) -> String {
+        let cleaned = speechText(text)
+        let totalLetters = cleaned.filter { $0.isLetter }.count
+        let latinLetters = cleaned.filter { character in
+            character.unicodeScalars.allSatisfy { scalar in
+                (65...90).contains(Int(scalar.value)) || (97...122).contains(Int(scalar.value))
+            }
+        }.count
+        let englishHits = cleaned
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && $0 != "'" })
+            .count { commonEnglishWords.contains(String($0)) }
+        let stronglyEnglish = latinLetters >= 20 &&
+            totalLetters > 0 &&
+            Double(latinLetters) / Double(totalLetters) >= 0.75 &&
+            englishHits >= 2
+        if stronglyEnglish { return "en" }
+        let normalized = reported
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(separator: "-")
+            .first
+            .map(String.init) ?? ""
+        return normalized.isEmpty ? "und" : normalized
+    }
+}
+
 struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
     let id: String
     let startMs: Int
@@ -112,8 +162,13 @@ struct TranslationService: Sendable {
         endpoint: URL,
         progress: @MainActor @Sendable (Int, Int) -> Void
     ) async throws -> TranslationDocument {
-        let sourceLanguage = normalizeLanguage(transcript.language)
         let sourceSegments = Self.makeSourceSegments(transcript)
+        guard !sourceSegments.isEmpty else { throw TranslationError.invalidResponse }
+        let sourceText = sourceSegments.map(\.text).joined(separator: " ")
+        let sourceLanguage = TranslationTextPolicy.sourceLanguage(
+            reported: transcript.language,
+            text: sourceText
+        )
         let batches = Self.makeBatches(sourceSegments)
         var translatedByID: [String: String] = [:]
 
@@ -131,7 +186,8 @@ struct TranslationService: Sendable {
         }
 
         let translated = try sourceSegments.map { source -> TranslationSegment in
-            guard let translatedText = translatedByID[source.id], !translatedText.isEmpty else {
+            let translatedText = TranslationTextPolicy.speechText(translatedByID[source.id] ?? "")
+            guard !translatedText.isEmpty else {
                 throw TranslationError.invalidResponse
             }
             return TranslationSegment(
@@ -178,26 +234,23 @@ struct TranslationService: Sendable {
         return decoded
     }
 
-    private func normalizeLanguage(_ language: String) -> String {
-        let trimmed = language.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "und" : trimmed
-    }
-
     private static func makeSourceSegments(_ transcript: ASRTranscript) -> [RequestSegment] {
-        if !transcript.segments.isEmpty {
-            return transcript.segments.enumerated().map { index, segment in
-                let startMs = max(0, Int((segment.start * 1_000).rounded()))
-                let endMs = max(startMs + 1, Int((segment.end * 1_000).rounded()))
-                return RequestSegment(
-                    id: "s\(index)",
-                    startMs: startMs,
-                    endMs: endMs,
-                    text: segment.text
-                )
-            }
+        let timed = transcript.segments.enumerated().compactMap { index, segment -> RequestSegment? in
+            let text = TranslationTextPolicy.speechText(segment.text)
+            guard !text.isEmpty else { return nil }
+            let startMs = max(0, Int((segment.start * 1_000).rounded()))
+            let endMs = max(startMs + 1, Int((segment.end * 1_000).rounded()))
+            return RequestSegment(
+                id: "s\(index)",
+                startMs: startMs,
+                endMs: endMs,
+                text: text
+            )
         }
+        if !timed.isEmpty { return timed }
 
-        return [RequestSegment(id: "s0", startMs: 0, endMs: 1, text: transcript.text)]
+        let fallback = TranslationTextPolicy.speechText(transcript.text)
+        return fallback.isEmpty ? [] : [RequestSegment(id: "s0", startMs: 0, endMs: 1, text: fallback)]
     }
 
     private static func makeBatches(_ segments: [RequestSegment]) -> [[RequestSegment]] {

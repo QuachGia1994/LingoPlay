@@ -31,7 +31,6 @@ enum TTSState: Equatable {
 enum TTSError: LocalizedError {
     case offlineVoiceMissing(String)
     case synthesisFailed(String)
-    case durationFitFailed(String)
     case invalidAudio
 
     var errorDescription: String? {
@@ -40,8 +39,6 @@ enum TTSError: LocalizedError {
             "No offline system voice is available for language '\(languageCode)' on this device."
         case let .synthesisFailed(message):
             "Speech synthesis failed: \(message)"
-        case let .durationFitFailed(segmentID):
-            "Speech for \(segmentID) is still longer than its source time window after safe speed fitting."
         case .invalidAudio:
             "The synthesized speech file is invalid."
         }
@@ -66,6 +63,11 @@ enum DurationFitPolicy {
 
     static func tailSilenceMs(actualMs: Int, targetMs: Int) -> Int {
         max(0, targetMs - actualMs)
+    }
+
+    static func effectiveEndMs(startMs: Int, sourceEndMs: Int, speechDurationMs: Int) -> Int {
+        let speechEnd = Int64(startMs) + Int64(max(1, speechDurationMs))
+        return Int(min(Int64(Int.max), max(Int64(sourceEndMs), speechEnd)))
     }
 
     static func nextRateMultiplier(actualMs: Int, targetMs: Int, current: Float) -> Float? {
@@ -134,11 +136,22 @@ final class SystemVietnameseTTSService {
             try await synthesizeOnce(text: segment.translatedText, voice: voice, multiplier: multiplier, to: fileURL)
             let durationMs = try measuredDurationMs(of: fileURL)
 
-            if DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs) {
+            let fits = DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs)
+            let next = DurationFitPolicy.nextRateMultiplier(
+                actualMs: durationMs,
+                targetMs: targetMs,
+                current: multiplier
+            )
+            let finalAttempt = attempt == DurationFitPolicy.maximumAttempts - 1
+            if fits || next == nil || finalAttempt {
                 return DubSpeechSegment(
                     id: segment.id,
                     startMs: segment.startMs,
-                    endMs: segment.endMs,
+                    endMs: DurationFitPolicy.effectiveEndMs(
+                        startMs: segment.startMs,
+                        sourceEndMs: segment.endMs,
+                        speechDurationMs: durationMs
+                    ),
                     audioURL: fileURL,
                     speechDurationMs: durationMs,
                     tailSilenceMs: DurationFitPolicy.tailSilenceMs(actualMs: durationMs, targetMs: targetMs),
@@ -146,18 +159,11 @@ final class SystemVietnameseTTSService {
                 )
             }
 
-            guard let next = DurationFitPolicy.nextRateMultiplier(
-                actualMs: durationMs,
-                targetMs: targetMs,
-                current: multiplier
-            ) else {
-                throw TTSError.durationFitFailed(segment.id)
-            }
             try? FileManager.default.removeItem(at: fileURL)
-            multiplier = next
+            multiplier = next ?? multiplier
         }
 
-        throw TTSError.durationFitFailed(segment.id)
+        throw TTSError.synthesisFailed("No speech synthesis attempt was executed.")
     }
 
     private func synthesizeOnce(

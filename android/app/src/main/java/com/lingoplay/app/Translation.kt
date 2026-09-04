@@ -40,21 +40,53 @@ enum class TranslationPhase {
     FAILED,
 }
 
+object TranslationTextPolicy {
+    private val controlTag = Regex("<[^>\\r\\n]{1,96}>")
+    private val bracketCue = Regex("\\[[^\\r\\n\\]]{1,96}\\]")
+    private val whitespace = Regex("\\s+")
+    private val word = Regex("[a-z]+(?:'[a-z]+)?")
+    private val commonEnglishWords = setOf(
+        "a", "and", "are", "can", "do", "have", "how", "i", "in", "is", "it",
+        "me", "of", "please", "that", "the", "this", "to", "we", "what", "you",
+    )
+
+    fun speechText(text: String): String = text
+        .replace(controlTag, " ")
+        .replace(bracketCue, " ")
+        .trim()
+        .replace(whitespace, " ")
+
+    fun sourceLanguage(reported: String, text: String): String {
+        val cleaned = speechText(text)
+        val totalLetters = cleaned.count(Char::isLetter)
+        val latinLetters = cleaned.count { it in 'a'..'z' || it in 'A'..'Z' }
+        val englishHits = word.findAll(cleaned.lowercase()).count { it.value in commonEnglishWords }
+        val stronglyEnglish = latinLetters >= 20 &&
+            totalLetters > 0 &&
+            latinLetters.toDouble() / totalLetters.toDouble() >= 0.75 &&
+            englishHits >= 2
+        if (stronglyEnglish) return "en"
+        return reported.trim().lowercase().substringBefore('-').ifEmpty { "und" }
+    }
+}
+
 object TranslationBatching {
     fun fromTranscript(transcript: ASRTranscript): List<TranslationSourceSegment> {
-        if (transcript.segments.isNotEmpty()) {
-            return transcript.segments.mapIndexed { index, segment ->
-                val startMs = max(0, (segment.startSeconds * 1000f).roundToInt())
-                val endMs = max(startMs + 1, (segment.endSeconds * 1000f).roundToInt())
-                TranslationSourceSegment(
-                    id = "s$index",
-                    startMs = startMs,
-                    endMs = endMs,
-                    text = segment.text,
-                )
-            }
+        val timed = transcript.segments.mapIndexedNotNull { index, segment ->
+            val text = TranslationTextPolicy.speechText(segment.text)
+            if (text.isEmpty()) return@mapIndexedNotNull null
+            val startMs = max(0, (segment.startSeconds * 1000f).roundToInt())
+            val endMs = max(startMs + 1, (segment.endSeconds * 1000f).roundToInt())
+            TranslationSourceSegment(
+                id = "s$index",
+                startMs = startMs,
+                endMs = endMs,
+                text = text,
+            )
         }
-        return listOf(TranslationSourceSegment("s0", 0, 1, transcript.text))
+        if (timed.isNotEmpty()) return timed
+        val fallback = TranslationTextPolicy.speechText(transcript.text)
+        return if (fallback.isEmpty()) emptyList() else listOf(TranslationSourceSegment("s0", 0, 1, fallback))
     }
 
     fun batches(
@@ -93,8 +125,10 @@ object TranslationService {
         val endpoint = endpointBaseUrl.trim().trimEnd('/')
         if (endpoint.isEmpty()) throw IllegalStateException("Translation backend is not configured.")
 
-        val sourceLanguage = transcript.language.trim().ifEmpty { "und" }
         val sourceSegments = TranslationBatching.fromTranscript(transcript)
+        check(sourceSegments.isNotEmpty()) { "No translatable speech remains after removing non-speech markers." }
+        val sourceText = sourceSegments.joinToString(" ") { it.text }
+        val sourceLanguage = TranslationTextPolicy.sourceLanguage(transcript.language, sourceText)
         val batches = TranslationBatching.batches(sourceSegments)
         val translatedById = linkedMapOf<String, String>()
 
@@ -104,7 +138,7 @@ object TranslationService {
         }
 
         val translatedSegments = sourceSegments.map { source ->
-            val text = translatedById[source.id]?.trim().orEmpty()
+            val text = TranslationTextPolicy.speechText(translatedById[source.id].orEmpty())
             check(text.isNotEmpty()) { "Translation backend returned an incomplete response." }
             TranslationSegment(source.id, source.startMs, source.endMs, source.text, text)
         }

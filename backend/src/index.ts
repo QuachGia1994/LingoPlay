@@ -121,23 +121,52 @@ async function parseJsonBody(request: Request): Promise<{ ok: true; value: unkno
   }
 }
 
+function sanitizeSpeechText(value: string): string {
+  return value
+    .replace(/<[^>\r\n]{1,96}>/g, " ")
+    .replace(/\[[^\r\n\]]{1,96}\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolvedSourceLanguage(request: TranslationRequest): string {
+  const reported = request.sourceLanguage.trim().toLowerCase().split("-")[0] || "und";
+  const text = sanitizeSpeechText(request.segments.map((segment) => segment.text).join(" "));
+  const letters = Array.from(text).filter((character) => /\p{L}/u.test(character));
+  const latinLetters = letters.filter((character) => /[A-Za-z]/.test(character)).length;
+  const commonEnglish = new Set([
+    "a", "and", "are", "can", "do", "have", "how", "i", "in", "is", "it",
+    "me", "of", "please", "that", "the", "this", "to", "we", "what", "you",
+  ]);
+  const englishHits = (text.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) ?? [])
+    .filter((word) => commonEnglish.has(word)).length;
+  const stronglyEnglish = latinLetters >= 20 &&
+    letters.length > 0 &&
+    latinLetters / letters.length >= 0.75 &&
+    englishHits >= 2;
+  return stronglyEnglish ? "en" : reported;
+}
+
 function translatedTextFromWorkersAI(value: unknown): string | null {
   if (!isObject(value) || typeof value.translated_text !== "string") return null;
-  const text = value.translated_text.trim();
+  const text = sanitizeSpeechText(value.translated_text);
   return text.length > 0 ? text : null;
 }
 
 async function translateWithWorkersAI(request: TranslationRequest, ai: WorkersAI): Promise<ProviderResponse> {
-  if (request.sourceLanguage === "und") throw new Error("source_language_unknown");
+  const sourceLanguage = resolvedSourceLanguage(request);
+  if (sourceLanguage === "und") throw new Error("source_language_unknown");
 
   const translations: ProviderTranslation[] = [];
   const concurrency = 8;
   for (let offset = 0; offset < request.segments.length; offset += concurrency) {
     const page = request.segments.slice(offset, offset + concurrency);
     const pageTranslations = await Promise.all(page.map(async (segment) => {
+      const sourceText = sanitizeSpeechText(segment.text);
+      if (!sourceText) throw new Error("source_text_empty");
       const response = await ai.run("@cf/meta/m2m100-1.2b", {
-        text: segment.text,
-        source_lang: request.sourceLanguage,
+        text: sourceText,
+        source_lang: sourceLanguage,
         target_lang: request.targetLanguage,
       });
       const text = translatedTextFromWorkersAI(response);
@@ -181,7 +210,7 @@ async function translate(request: Request, env: Env): Promise<Response> {
       normalized = await translateWithWorkersAI(validated.data, env.AI);
     } catch (error) {
       const code = error instanceof Error ? error.message : "provider_failed";
-      if (code === "source_language_unknown") return json({ error: code }, 422);
+      if (code === "source_language_unknown" || code === "source_text_empty") return json({ error: code }, 422);
       if (code === "provider_invalid_shape") return json({ error: code }, 502);
       return json({ error: "provider_unreachable" }, 502);
     }

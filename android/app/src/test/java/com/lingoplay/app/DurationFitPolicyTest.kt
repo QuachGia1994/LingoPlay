@@ -34,4 +34,28 @@ class DurationFitPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun extendsSpeechWindowWhenFinalSafeRateStillOverruns() {
+        assertEquals(
+            2_600,
+            DurationFitPolicy.effectiveEndMs(
+                startMs = 1_000,
+                sourceEndMs = 2_000,
+                speechDurationMs = 1_600,
+            ),
+        )
+    }
+
+    @Test
+    fun preservesSourceWindowWhenSpeechFits() {
+        assertEquals(
+            2_000,
+            DurationFitPolicy.effectiveEndMs(
+                startMs = 1_000,
+                sourceEndMs = 2_000,
+                speechDurationMs = 720,
+            ),
+        )
+    }
 }

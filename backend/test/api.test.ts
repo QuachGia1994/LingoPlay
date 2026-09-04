@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleRequest, validateTranslationPayload } from "../src/index.ts";
+import {
+  handleRequest,
+  validateTranslationPayload,
+  type WorkersAITranslationInput,
+} from "../src/index.ts";
 
 test("health declares the zero-media backend boundary", async () => {
   const response = await handleRequest(new Request("https://lingoplay.test/health"));
@@ -85,6 +89,40 @@ test("Workers AI translation preserves ids and sends text only", async () => {
     { model: "@cf/meta/m2m100-1.2b", text: "Hello world", source_lang: "en", target_lang: "vi" },
     { model: "@cf/meta/m2m100-1.2b", text: "This is LingoPlay", source_lang: "en", target_lang: "vi" },
   ]);
+});
+
+test("Workers AI strips control tokens and corrects strong English misdetection", async () => {
+  let received: WorkersAITranslationInput | undefined;
+  const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceLanguage: "th",
+      targetLanguage: "vi",
+      segments: [{
+        id: "s1",
+        startMs: 0,
+        endMs: 4000,
+        text: "<|startoftranscript|><transcribe><0.00>[Music] We have to shut it down. Please tell me how. <12.00>",
+      }],
+    }),
+  }), {
+    AI: {
+      run: async (_model, input) => {
+        received = input;
+        return { translated_text: "<transcribe><0.00> Chúng ta phải tắt nó. <12.00>" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, {
+    text: "We have to shut it down. Please tell me how.",
+    source_lang: "en",
+    target_lang: "vi",
+  });
+  const body = await response.json() as { translations: Array<{ id: string; text: string }> };
+  assert.deepEqual(body.translations, [{ id: "s1", text: "Chúng ta phải tắt nó." }]);
 });
 
 test("Workers AI rejects unknown source language instead of assuming English", async () => {

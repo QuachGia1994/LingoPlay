@@ -121,6 +121,18 @@ require(
     "https://lingoplay-api.kim-phong619.workers.dev" in translation_source,
     "iOS translation resolver has production fallback",
 )
+android_translation = (ROOT / "android/app/src/main/java/com/lingoplay/app/Translation.kt").read_text(encoding="utf-8")
+android_tts = (ROOT / "android/app/src/main/java/com/lingoplay/app/TextToSpeech.kt").read_text(encoding="utf-8")
+ios_tts = (ROOT / "ios/LingoPlay/TextToSpeech.swift").read_text(encoding="utf-8")
+for name, source in (("Android", android_translation), ("iOS", translation_source)):
+    require("TranslationTextPolicy" in source, f"{name} translation text policy exists")
+    require("stronglyEnglish" in source, f"{name} corrects strong English language evidence")
+for name, source in (("Android", android_tts), ("iOS", ios_tts)):
+    require("effectiveEndMs" in source, f"{name} extends local speech window on safe-rate overflow")
+    require(
+        "still longer than its source time window after safe speed fitting" not in source,
+        f"{name} does not abort the whole job for one duration overflow",
+    )
 wrangler_spec = (ROOT / "backend/wrangler.jsonc").read_text(encoding="utf-8")
 require('"binding": "AI"' in wrangler_spec, "Cloudflare Worker keeps Workers AI binding")
 backend_source = (ROOT / "backend/src/index.ts").read_text(encoding="utf-8")

@@ -57,6 +57,11 @@ object DurationFitPolicy {
 
     fun tailSilenceMs(actualMs: Int, targetMs: Int): Int = max(0, targetMs - actualMs)
 
+    fun effectiveEndMs(startMs: Int, sourceEndMs: Int, speechDurationMs: Int): Int {
+        val speechEnd = startMs.toLong() + max(1, speechDurationMs).toLong()
+        return max(sourceEndMs.toLong(), speechEnd).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
     fun nextRateMultiplier(actualMs: Int, targetMs: Int, current: Float): Float? {
         if (fits(actualMs, targetMs) || current >= MAX_RATE_MULTIPLIER - 0.01f) return null
         val ratio = actualMs.toFloat() / max(1, targetMs).toFloat()
@@ -152,11 +157,14 @@ object SystemVietnameseTTSService {
             synthesizeOnce(tts, segment.translatedText, multiplier, output)
             val durationMs = measuredDurationMs(output)
 
-            if (DurationFitPolicy.fits(durationMs, targetMs)) {
+            val fits = DurationFitPolicy.fits(durationMs, targetMs)
+            val next = DurationFitPolicy.nextRateMultiplier(durationMs, targetMs, multiplier)
+            val finalAttempt = attempt == DurationFitPolicy.MAXIMUM_ATTEMPTS - 1
+            if (fits || next == null || finalAttempt) {
                 return DubSpeechSegment(
                     id = segment.id,
                     startMs = segment.startMs,
-                    endMs = segment.endMs,
+                    endMs = DurationFitPolicy.effectiveEndMs(segment.startMs, segment.endMs, durationMs),
                     audioFile = output,
                     speechDurationMs = durationMs,
                     tailSilenceMs = DurationFitPolicy.tailSilenceMs(durationMs, targetMs),
@@ -164,13 +172,11 @@ object SystemVietnameseTTSService {
                 )
             }
 
-            val next = DurationFitPolicy.nextRateMultiplier(durationMs, targetMs, multiplier)
-                ?: throw IllegalStateException("Vietnamese speech for ${segment.id} is still longer than its source time window after safe speed fitting.")
             output.delete()
             multiplier = next
         }
 
-        throw IllegalStateException("Vietnamese speech duration fitting failed for ${segment.id}.")
+        error("No speech synthesis attempt was executed.")
     }
 
     private suspend fun synthesizeOnce(

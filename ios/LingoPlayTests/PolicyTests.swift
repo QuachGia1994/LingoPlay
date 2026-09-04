@@ -19,6 +19,44 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(TranslationEndpointConfiguration.resolve(plistValue: "https://safe.test?q=1")?.absoluteString, expected)
     }
 
+    func testTranslationTextPolicyRemovesControlsAndCorrectsLanguage() {
+        XCTAssertEqual(
+            TranslationTextPolicy.speechText(
+                "<|startoftranscript|><transcribe><0.00>[Music] We have to shut it down. <12.00>"
+            ),
+            "We have to shut it down."
+        )
+        XCTAssertEqual(
+            TranslationTextPolicy.sourceLanguage(
+                reported: "th",
+                text: "We have to shut it down. Please tell me how you can do this."
+            ),
+            "en"
+        )
+        XCTAssertEqual(
+            TranslationTextPolicy.sourceLanguage(reported: "th", text: "สวัสดีครับ วันนี้อากาศดีมาก"),
+            "th"
+        )
+    }
+
+    func testDurationOverflowExtendsLocalSpeechWindowWithoutFatalFit() {
+        XCTAssertEqual(
+            DurationFitPolicy.effectiveEndMs(startMs: 1_000, sourceEndMs: 2_000, speechDurationMs: 1_600),
+            2_600
+        )
+        XCTAssertEqual(
+            DurationFitPolicy.effectiveEndMs(startMs: 1_000, sourceEndMs: 2_000, speechDurationMs: 800),
+            2_000
+        )
+        XCTAssertNil(
+            DurationFitPolicy.nextRateMultiplier(
+                actualMs: 2_600,
+                targetMs: 1_000,
+                current: DurationFitPolicy.maxRateMultiplier
+            )
+        )
+    }
+
     func testPlaybackSpeedSanitization() {
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(1.25), 1.25)
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(0), 1.0)
