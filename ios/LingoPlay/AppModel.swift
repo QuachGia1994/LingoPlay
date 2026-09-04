@@ -255,6 +255,7 @@ final class AppModel {
 
     private func synthesizeOfflineSpeech(_ document: TranslationDocument, config: ProcessingConfig) async {
         do {
+            ttsState = .synthesizing(segment: 0, totalSegments: document.segments.count)
             let dub = try await ttsService.synthesize(
                 document: document,
                 preferredVoiceIdentifier: config.preferredVoiceIdentifier

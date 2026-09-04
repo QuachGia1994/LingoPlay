@@ -80,6 +80,21 @@ enum DurationFitPolicy {
     }
 }
 
+enum TTSSynthesisLivenessPolicy {
+    static let minimumTimeoutSeconds = 20.0
+    static let maximumTimeoutSeconds = 60.0
+
+    static func timeoutSeconds(textLength: Int, targetDurationMs: Int) -> Double {
+        let timelineBudget = (Double(max(1, targetDurationMs)) / 1_000 * 2.0) + 10.0
+        let textBudget = (Double(max(1, textLength)) / 5.0) + 10.0
+        return min(maximumTimeoutSeconds, max(minimumTimeoutSeconds, timelineBudget, textBudget))
+    }
+
+    static func timeoutNanoseconds(textLength: Int, targetDurationMs: Int) -> UInt64 {
+        UInt64((timeoutSeconds(textLength: textLength, targetDurationMs: targetDurationMs) * 1_000_000_000).rounded())
+    }
+}
+
 @MainActor
 final class SystemVietnameseTTSService {
     func synthesize(
@@ -91,10 +106,17 @@ final class SystemVietnameseTTSService {
             throw TTSError.offlineVoiceMissing(document.targetLanguage)
         }
         let root = try makeSessionDirectory()
+        let synthesizer = AVSpeechSynthesizer()
+        defer { _ = synthesizer.stopSpeaking(at: .immediate) }
         var output: [DubSpeechSegment] = []
 
         for (index, segment) in document.segments.enumerated() {
-            let synthesized = try await synthesizeSegment(segment, voice: voice, root: root)
+            let synthesized = try await synthesizeSegment(
+                segment,
+                voice: voice,
+                root: root,
+                synthesizer: synthesizer
+            )
             output.append(synthesized)
             progress(index + 1, document.segments.count)
         }
@@ -125,7 +147,8 @@ final class SystemVietnameseTTSService {
     private func synthesizeSegment(
         _ segment: TranslationSegment,
         voice: AVSpeechSynthesisVoice,
-        root: URL
+        root: URL,
+        synthesizer: AVSpeechSynthesizer
     ) async throws -> DubSpeechSegment {
         let targetMs = DurationFitPolicy.targetDurationMs(startMs: segment.startMs, endMs: segment.endMs)
         var multiplier: Float = 1.0
@@ -133,7 +156,17 @@ final class SystemVietnameseTTSService {
         for attempt in 0..<DurationFitPolicy.maximumAttempts {
             let fileURL = root.appendingPathComponent("\(segment.id)-\(attempt).caf")
             try? FileManager.default.removeItem(at: fileURL)
-            try await synthesizeOnce(text: segment.translatedText, voice: voice, multiplier: multiplier, to: fileURL)
+            try await synthesizeOnce(
+                text: segment.translatedText,
+                voice: voice,
+                multiplier: multiplier,
+                to: fileURL,
+                synthesizer: synthesizer,
+                timeoutNanoseconds: TTSSynthesisLivenessPolicy.timeoutNanoseconds(
+                    textLength: segment.translatedText.count,
+                    targetDurationMs: targetMs
+                )
+            )
             let durationMs = try measuredDurationMs(of: fileURL)
 
             let fits = DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs)
@@ -170,7 +203,9 @@ final class SystemVietnameseTTSService {
         text: String,
         voice: AVSpeechSynthesisVoice,
         multiplier: Float,
-        to url: URL
+        to url: URL,
+        synthesizer: AVSpeechSynthesizer,
+        timeoutNanoseconds: UInt64
     ) async throws {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
@@ -182,14 +217,40 @@ final class SystemVietnameseTTSService {
         utterance.postUtteranceDelay = 0
 
         let writer = SpeechBufferFileWriter(url: url)
-        try await withCheckedThrowingContinuation { continuation in
-            writer.begin(continuation: continuation)
-            let synthesizer = AVSpeechSynthesizer()
-            writer.retain(synthesizer)
-            synthesizer.write(utterance) { buffer in
-                writer.consume(buffer)
+        try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation { continuation in
+                    guard writer.begin(continuation: continuation) else {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    let watchdog = Task { @MainActor [writer] in
+                        do {
+                            try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                        } catch {
+                            return
+                        }
+                        writer.timeout(
+                            TTSError.synthesisFailed("Offline voice callback timed out; retry this job.")
+                        )
+                    }
+                    guard writer.retain(synthesizer, watchdog: watchdog) else {
+                        watchdog.cancel()
+                        return
+                    }
+                    guard !Task.isCancelled else {
+                        writer.cancel()
+                        return
+                    }
+                    synthesizer.write(utterance) { buffer in
+                        writer.consume(buffer)
+                    }
+                }
+            },
+            onCancel: {
+                writer.cancel()
             }
-        }
+        )
     }
 
     private func measuredDurationMs(of url: URL) throws -> Int {
@@ -206,6 +267,7 @@ private final class SpeechBufferFileWriter: @unchecked Sendable {
     private var file: AVAudioFile?
     private var continuation: CheckedContinuation<Void, Error>?
     private var synthesizer: AVSpeechSynthesizer?
+    private var watchdog: Task<Void, Never>?
     private var frameCount: AVAudioFramePosition = 0
     private var finished = false
 
@@ -213,16 +275,33 @@ private final class SpeechBufferFileWriter: @unchecked Sendable {
         self.url = url
     }
 
-    func begin(continuation: CheckedContinuation<Void, Error>) {
+    func begin(continuation: CheckedContinuation<Void, Error>) -> Bool {
         lock.withLock {
+            guard !finished else { return false }
             self.continuation = continuation
+            return true
         }
     }
 
-    func retain(_ synthesizer: AVSpeechSynthesizer) {
+    func retain(_ synthesizer: AVSpeechSynthesizer, watchdog: Task<Void, Never>) -> Bool {
         lock.withLock {
+            guard !finished else { return false }
             self.synthesizer = synthesizer
+            self.watchdog = watchdog
+            return true
         }
+    }
+
+    @MainActor
+    func timeout(_ error: Error) {
+        let activeSynthesizer = lock.withLock { synthesizer }
+        if finish(.failure(error)) {
+            _ = activeSynthesizer?.stopSpeaking(at: .immediate)
+        }
+    }
+
+    func cancel() {
+        finish(.failure(CancellationError()))
     }
 
     func consume(_ buffer: AVAudioBuffer) {
@@ -253,22 +332,27 @@ private final class SpeechBufferFileWriter: @unchecked Sendable {
         }
     }
 
-    private func finish(_ result: Result<Void, Error>) {
-        let continuation: CheckedContinuation<Void, Error>? = lock.withLock {
-            guard !finished else { return nil }
+    @discardableResult
+    private func finish(_ result: Result<Void, Error>) -> Bool {
+        let completion: (CheckedContinuation<Void, Error>?, Task<Void, Never>?) = lock.withLock {
+            guard !finished else { return (nil, nil) }
             finished = true
             file = nil
             synthesizer = nil
-            let saved = self.continuation
-            self.continuation = nil
-            return saved
+            let savedContinuation = continuation
+            let savedWatchdog = watchdog
+            continuation = nil
+            watchdog = nil
+            return (savedContinuation, savedWatchdog)
         }
-        guard let continuation else { return }
+        completion.1?.cancel()
+        guard let continuation = completion.0 else { return false }
         switch result {
         case .success:
             continuation.resume()
         case let .failure(error):
             continuation.resume(throwing: error)
         }
+        return true
     }
 }

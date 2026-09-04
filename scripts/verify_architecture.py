@@ -143,6 +143,13 @@ for name, source in (("Android", android_tts), ("iOS", ios_tts)):
         "still longer than its source time window after safe speed fitting" not in source,
         f"{name} does not abort the whole job for one duration overflow",
     )
+require("TTSSynthesisLivenessPolicy" in ios_tts, "iOS offline TTS has a bounded liveness policy")
+require("withTaskCancellationHandler" in ios_tts, "iOS offline TTS cancellation resumes its continuation")
+require("writer.timeout(" in ios_tts, "iOS offline TTS watchdog cannot wait forever")
+require("stopSpeaking(at: .immediate)" in ios_tts, "iOS offline TTS stops a timed-out synthesizer")
+require(ios_tts.count("AVSpeechSynthesizer()") == 1, "iOS reuses one serial synthesizer per TTS job")
+ios_processing_view = (ROOT / "ios/LingoPlay/ProcessingView.swift").read_text(encoding="utf-8")
+require("statusOverride: ttsStageStatus" in ios_processing_view, "iOS exposes active TTS segment progress")
 wrangler_spec = (ROOT / "backend/wrangler.jsonc").read_text(encoding="utf-8")
 require('"binding": "AI"' in wrangler_spec, "Cloudflare Worker keeps Workers AI binding")
 backend_source = (ROOT / "backend/src/index.ts").read_text(encoding="utf-8")

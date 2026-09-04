@@ -38,7 +38,11 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Translating", state: translationStageState)
                     Divider().overlay(LPTheme.border)
-                    ProcessingStageRow(title: "Creating offline voice", state: ttsStageState)
+                    ProcessingStageRow(
+                        title: "Creating offline voice",
+                        state: ttsStageState,
+                        statusOverride: ttsStageStatus
+                    )
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Mixing audio", state: mixingStageState)
                 }
@@ -270,6 +274,13 @@ struct ProcessingView: View {
         }
     }
 
+    private var ttsStageStatus: String? {
+        guard case let .synthesizing(completedSegments, totalSegments) = model.ttsState,
+              totalSegments > 0 else { return nil }
+        let currentSegment = min(totalSegments, max(1, completedSegments + 1))
+        return "\(currentSegment)/\(totalSegments)"
+    }
+
     private var mixingStageState: ProcessingStageRow.State {
         switch model.mixState {
         case .renderingAudio, .remuxing: .active
@@ -293,6 +304,13 @@ private struct ProcessingStageRow: View {
 
     let title: String
     let state: State
+    let statusOverride: String?
+
+    init(title: String, state: State, statusOverride: String? = nil) {
+        self.title = title
+        self.state = state
+        self.statusOverride = statusOverride
+    }
 
     var body: some View {
         HStack(spacing: 13) {
@@ -317,7 +335,7 @@ private struct ProcessingStageRow: View {
             Text(title)
                 .font(.subheadline.weight(.medium))
             Spacer()
-            Text(status)
+            Text(statusOverride ?? status)
                 .font(.caption)
                 .foregroundStyle(LPTheme.secondaryText)
         }

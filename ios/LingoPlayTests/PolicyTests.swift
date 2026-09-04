@@ -57,6 +57,25 @@ final class PolicyTests: XCTestCase {
         )
     }
 
+    func testTTSSynthesisTimeoutIsBoundedAndScalesWithWork() {
+        XCTAssertEqual(
+            TTSSynthesisLivenessPolicy.timeoutSeconds(textLength: 1, targetDurationMs: 1),
+            TTSSynthesisLivenessPolicy.minimumTimeoutSeconds
+        )
+        XCTAssertGreaterThan(
+            TTSSynthesisLivenessPolicy.timeoutSeconds(textLength: 120, targetDurationMs: 8_000),
+            TTSSynthesisLivenessPolicy.minimumTimeoutSeconds
+        )
+        XCTAssertEqual(
+            TTSSynthesisLivenessPolicy.timeoutSeconds(textLength: 10_000, targetDurationMs: 600_000),
+            TTSSynthesisLivenessPolicy.maximumTimeoutSeconds
+        )
+        XCTAssertEqual(
+            TTSSynthesisLivenessPolicy.timeoutNanoseconds(textLength: 1, targetDurationMs: 1),
+            20_000_000_000
+        )
+    }
+
     func testPlaybackSpeedSanitization() {
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(1.25), 1.25)
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(0), 1.0)
