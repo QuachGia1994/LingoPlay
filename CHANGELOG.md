@@ -24,6 +24,11 @@ All notable changes to LingoPlay are documented here.
 - Durable Stage 7 local libraries on iOS and Android that save successful final MP4s with compact translation metadata, reopen them for playback, expose native share/export, delete local results, and report real saved-media storage usage.
 - Stage 7.1 video-library import UX using Android Photo Picker `VideoOnly` and iOS Photos Picker file transfer, avoiding the generic folder browser as the primary import path and avoiding full-video in-memory loads.
 - Persisted Midnight/High Contrast appearance and English/Tiếng Việt interface-language controls for the primary mobile shell.
+- Stage 8 explicit Speech AI model acquisition on both clients: Whisper Tiny install/progress/cancel/delete UI, persistent activation, free-space/Wi-Fi gates, and offline-only inference after activation.
+- Android Stage 8 resumable direct runtime-model download with HTTP Range `.part` files, exact per-file SHA-256 verification, versioned activation, and focused manifest/hash/progress unit tests.
+- iOS Stage 8 WhisperKit Tiny acquisition with explicit download, prewarm/load validation, durable active-model pointer, and processing resume from already-prepared audio after installation.
+- Stage 9 iOS StoreKit 2 Plus pre-wiring with weekly/monthly product IDs, product loading, verified-transaction entitlements, purchase/pending/cancel/restore handling, and transaction update reconciliation.
+- Local `Products.storekit` subscription catalog plus XcodeGen Run-scheme StoreKit configuration so Plus purchase flows can be tested before an Apple Developer account/App Store Connect products exist.
 - Product and architecture documentation defining the local-media trust boundary and zero-video-upload design.
 
 ### Changed
@@ -38,3 +43,5 @@ All notable changes to LingoPlay are documented here.
 - Removed the redundant Offline tab because every durable Library item is already local/offline; the center bottom-bar affordance is now the explicit Import action instead of a duplicate Home button.
 - Android dark-theme content propagation now establishes the correct light foreground at the root, with a brighter accessible secondary palette and an optional High Contrast mode.
 - Android Plus presentation now mirrors the compact premium-icon treatment used by iOS instead of a text-only `PLUS` pill.
+- Speech-model downloads remain explicit user actions; importing or processing media never silently starts a large model download.
+- Current pre-release capabilities remain usable when StoreKit products are unavailable; Plus entitlement is derived only from verified active StoreKit transactions rather than a persisted local unlock boolean.

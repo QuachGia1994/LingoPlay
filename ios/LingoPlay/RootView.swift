@@ -20,6 +20,9 @@ struct RootView: View {
         .foregroundStyle(.white)
         .tint(LPTheme.cyan)
         .environment(\.locale, Locale(identifier: model.uiLanguageCode))
+        .sheet(isPresented: $model.plusPresented) {
+            PlusView(model: model)
+        }
         .task {
             guard model.stage == .splash else { return }
             try? await Task.sleep(for: .milliseconds(900))

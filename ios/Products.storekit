@@ -1,0 +1,96 @@
+{
+  "identifier" : "B7391C9E-5C18-48B7-A20F-6B7D6F6E3101",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "6D3B7898-142C-481B-94D5-425359B10001",
+      "localizations" : [
+        {
+          "description" : "LingoPlay Plus subscriptions",
+          "displayName" : "LingoPlay Plus",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "Gói thuê bao LingoPlay Plus",
+          "displayName" : "LingoPlay Plus",
+          "locale" : "vi"
+        }
+      ],
+      "name" : "LingoPlay Plus",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "1.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "E4EC2056-5CFA-4A95-A99B-100000000001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "LingoPlay Plus, billed weekly for local testing.",
+              "displayName" : "Plus Weekly",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "LingoPlay Plus, thanh toán hàng tuần để test cục bộ.",
+              "displayName" : "Plus Tuần",
+              "locale" : "vi"
+            }
+          ],
+          "productID" : "com.lingoplay.plus.weekly",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "LingoPlay Plus Weekly",
+          "subscriptionGroupID" : "6D3B7898-142C-481B-94D5-425359B10001",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "E4EC2056-5CFA-4A95-A99B-100000000002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "LingoPlay Plus, billed monthly for local testing.",
+              "displayName" : "Plus Monthly",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "LingoPlay Plus, thanh toán hàng tháng để test cục bộ.",
+              "displayName" : "Plus Tháng",
+              "locale" : "vi"
+            }
+          ],
+          "productID" : "com.lingoplay.plus.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "LingoPlay Plus Monthly",
+          "subscriptionGroupID" : "6D3B7898-142C-481B-94D5-425359B10001",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

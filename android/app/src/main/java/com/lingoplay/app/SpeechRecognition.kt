@@ -51,8 +51,9 @@ data class SherpaWhisperModel(
 
 object ASRModelStore {
     fun findWhisperModel(context: Context): SherpaWhisperModel? {
-        val root = File(context.filesDir, "lingoplay/models/sherpa-whisper/current")
-        if (!root.isDirectory) return null
+        val managed = ASRModelInstaller.activeDirectory(context)
+        val legacy = File(context.filesDir, "lingoplay/models/sherpa-whisper/current")
+        val root = managed ?: legacy.takeIf(File::isDirectory) ?: return null
         val files = root.walkTopDown().filter(File::isFile).toList()
         val encoder = files.firstOrNull { it.extension.equals("onnx", true) && it.name.contains("encoder", true) }
         val decoder = files.firstOrNull { it.extension.equals("onnx", true) && it.name.contains("decoder", true) }

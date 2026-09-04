@@ -36,7 +36,9 @@ final class AppModel {
         didSet { updatePlayerMix() }
     }
     var playbackSpeed = 1.0
-    var wifiOnly = true
+    var wifiOnly = UserDefaults.standard.object(forKey: "lingoplay.wifiOnly") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(wifiOnly, forKey: "lingoplay.wifiOnly") }
+    }
     var bilingualSubtitles = true
     var highContrast = UserDefaults.standard.bool(forKey: "lingoplay.highContrast")
     var uiLanguageCode = UserDefaults.standard.string(forKey: "lingoplay.uiLanguage") ?? "en"
@@ -47,6 +49,8 @@ final class AppModel {
     var translationState: TranslationState = .idle
     var ttsState: TTSState = .idle
     var mixState: MixState = .idle
+    var modelInstallState: ASRModelInstallState = .notInstalled
+    var plusPresented = false
     var processedMedia: LocalDubMediaResult?
     var libraryItems: [LocalLibraryItem] = []
     var libraryBytes: Int64 = 0
@@ -59,8 +63,11 @@ final class AppModel {
     var playbackDuration = 0.0
     var isPlaying = false
 
+    let plusStore = PlusStore()
+
     private let mediaService = LocalMediaService()
     private let asrModelStore = ASRModelStore()
+    private let modelInstaller = WhisperModelInstaller()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     private let translationService = TranslationService()
     private let ttsService = SystemVietnameseTTSService()
@@ -68,10 +75,15 @@ final class AppModel {
     private let libraryStore = LocalLibraryStore()
     private var playbackMixContext: PlaybackMixContext?
     private var playbackTimeObserver: Any?
+    private var modelInstallTask: Task<Void, Never>?
 
     func finishSplash() {
         stage = .home
-        Task { await refreshLibrary() }
+        plusStore.start()
+        Task {
+            await refreshLibrary()
+            await refreshModelState()
+        }
     }
 
     func beginImport() {
@@ -130,14 +142,15 @@ final class AppModel {
     }
 
     private func recognizeSpeech(from audioURL: URL) async {
-        guard let modelFolder = asrModelStore.whisperModelFolder() else {
+        guard let model = asrModelStore.whisperModel() else {
             asrState = .modelMissing
+            modelInstallState = .notInstalled
             return
         }
         asrState = .loadingModel
         do {
             asrState = .transcribing
-            let transcript = try await speechRecognizer.transcribe(audioURL: audioURL, modelFolder: modelFolder)
+            let transcript = try await speechRecognizer.transcribe(audioURL: audioURL, model: model)
             asrState = .completed(transcript)
             processingProgress = 0.4
             await translateTranscript(transcript)
@@ -242,6 +255,55 @@ final class AppModel {
         libraryItems = items
         libraryBytes = await libraryStore.totalBytes(items)
         libraryURLs = urls
+    }
+
+    func refreshModelState() async {
+        modelInstallState = await modelInstaller.state()
+    }
+
+    func installSpeechModel() {
+        guard modelInstallTask == nil else { return }
+        modelInstallTask = Task { [weak self] in
+            guard let self else { return }
+            defer { modelInstallTask = nil }
+            do {
+                _ = try await modelInstaller.install(wifiOnly: wifiOnly) { [weak self] progress in
+                    await MainActor.run {
+                        self?.modelInstallState = .downloading(progress: progress)
+                    }
+                }
+                await refreshModelState()
+                if case .audioReady(let audioURL) = mediaState, asrState == .modelMissing {
+                    await recognizeSpeech(from: audioURL)
+                }
+            } catch is CancellationError {
+                await refreshModelState()
+            } catch {
+                modelInstallState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func cancelSpeechModelInstall() {
+        modelInstallTask?.cancel()
+    }
+
+    func deleteSpeechModel() {
+        guard asrState != .loadingModel, asrState != .transcribing else { return }
+        modelInstallTask?.cancel()
+        modelInstallTask = nil
+        Task {
+            do {
+                try await modelInstaller.deleteInstalledModel()
+                modelInstallState = .notInstalled
+            } catch {
+                modelInstallState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    var canDeleteSpeechModel: Bool {
+        asrState != .loadingModel && asrState != .transcribing
     }
 
     func openLibraryItem(_ item: LocalLibraryItem) async {

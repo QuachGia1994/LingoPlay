@@ -1,6 +1,8 @@
 name: LingoPlay
 options:
   minimumXcodeGenVersion: 2.44.0
+fileGroups:
+  - Products.storekit
 packages:
   ArgmaxOSS:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
@@ -15,6 +17,8 @@ targets:
     dependencies:
       - package: ArgmaxOSS
         product: WhisperKit
+    scheme:
+      storeKitConfiguration: Products.storekit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lingoplay.app

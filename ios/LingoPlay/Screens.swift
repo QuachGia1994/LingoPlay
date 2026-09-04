@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreTransferable
 import PhotosUI
+import StoreKit
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -65,10 +66,16 @@ struct HomeView: View {
                             .foregroundStyle(LPTheme.secondaryText)
                     }
                     Spacer()
-                    Image(systemName: "crown.fill")
-                        .foregroundStyle(LPTheme.accent)
-                        .padding(10)
-                        .background(LPTheme.surface, in: Circle())
+                    Button {
+                        model.plusPresented = true
+                    } label: {
+                        Image(systemName: "crown.fill")
+                            .foregroundStyle(LPTheme.accent)
+                            .padding(10)
+                            .background(LPTheme.surface, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("LingoPlay Plus")
                 }
 
                 VStack(alignment: .leading, spacing: 18) {
@@ -424,10 +431,7 @@ struct ProcessingView: View {
                     .lpCard()
 
                 if case .modelMissing = model.asrState {
-                    Text("Speech model is not installed. LingoPlay will not download a large model without an explicit model-install action.")
-                        .font(.caption)
-                        .foregroundStyle(LPTheme.secondaryText)
-                        .lpCard()
+                    SpeechModelManagementCard(model: model)
                 }
 
                 if case .endpointMissing = model.translationState {
@@ -996,8 +1000,19 @@ struct SettingsView: View {
                 }
                 .lpCard()
 
+                SpeechModelManagementCard(model: model)
+
                 VStack(spacing: 0) {
-                    SettingsValueRow(icon: "shippingbox.fill", title: model.uiText("Downloaded AI Models", "Model AI đã tải"), value: model.uiText("Not installed", "Chưa cài"))
+                    Button {
+                        model.plusPresented = true
+                    } label: {
+                        SettingsValueRow(
+                            icon: "crown.fill",
+                            title: "LingoPlay Plus",
+                            value: model.plusStore.isPlus ? model.uiText("Active", "Đang hoạt động") : model.uiText("Explore", "Xem gói")
+                        )
+                    }
+                    .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
                     SettingsValueRow(icon: "info.circle.fill", title: model.uiText("About LingoPlay", "Giới thiệu LingoPlay"), value: "Foundation")
                 }
@@ -1007,6 +1022,188 @@ struct SettingsView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+    }
+}
+
+struct PlusView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    VStack(spacing: 10) {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 38, weight: .bold))
+                            .foregroundStyle(LPTheme.accent)
+                        Text("LingoPlay Plus")
+                            .font(.largeTitle.bold())
+                        Text(model.uiText("StoreKit 2 is pre-wired for local testing. Current pre-release capabilities remain available while billing is being validated.", "StoreKit 2 đã được đấu sẵn để test cục bộ. Các tính năng pre-release hiện tại vẫn dùng được trong lúc kiểm thử thanh toán."))
+                            .font(.subheadline)
+                            .foregroundStyle(LPTheme.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    if model.plusStore.isPlus {
+                        Label(model.uiText("Plus active on this StoreKit account", "Plus đang hoạt động trên tài khoản StoreKit này"), systemImage: "checkmark.seal.fill")
+                            .font(.headline)
+                            .foregroundStyle(LPTheme.cyan)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lpCard()
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(model.uiText("Planned Plus capabilities", "Tính năng Plus dự kiến"), systemImage: "sparkles")
+                            .font(.headline)
+                            .foregroundStyle(LPTheme.accent)
+                        Text(model.uiText("Natural voices · clean dub/source separation · background & PiP playback · smarter audio controls · future offline model management upgrades.", "Giọng tự nhiên · clean dub/tách nguồn · phát nền & PiP · điều khiển audio nâng cao · nâng cấp quản lý model offline trong tương lai."))
+                            .font(.subheadline)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .lpCard()
+
+                    if model.plusStore.products.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(model.uiText("Products unavailable", "Chưa có sản phẩm"))
+                                .font(.headline)
+                            Text(model.plusStore.statusMessage ?? model.uiText("Run the app from Xcode with Products.storekit selected in the Run scheme to test purchases locally without App Store Connect.", "Chạy app từ Xcode với Products.storekit được chọn trong Run scheme để test mua hàng cục bộ mà không cần App Store Connect."))
+                                .font(.caption)
+                                .foregroundStyle(LPTheme.secondaryText)
+                            Button(model.uiText("Reload products", "Tải lại sản phẩm")) {
+                                Task { await model.plusStore.refresh() }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .lpCard()
+                    } else {
+                        ForEach(model.plusStore.products, id: \.id) { product in
+                            Button {
+                                Task { await model.plusStore.purchase(product) }
+                            } label: {
+                                HStack(spacing: 14) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(product.displayName)
+                                            .font(.headline)
+                                        Text(product.description)
+                                            .font(.caption)
+                                            .foregroundStyle(LPTheme.secondaryText)
+                                    }
+                                    Spacer()
+                                    Text(product.displayPrice)
+                                        .font(.headline)
+                                        .foregroundStyle(LPTheme.cyan)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(model.plusStore.purchaseState == .purchasing || model.plusStore.purchaseState == .restoring)
+                            .lpCard()
+                        }
+                    }
+
+                    if let message = model.plusStore.statusMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(LPTheme.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button(model.uiText("Restore Purchases", "Khôi phục giao dịch")) {
+                        Task { await model.plusStore.restore() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.plusStore.purchaseState == .purchasing || model.plusStore.purchaseState == .restoring)
+
+                    Text(model.uiText("Development note: these local StoreKit products are not synced to App Store Connect. Use the same product IDs later when an Apple Developer account is available.", "Ghi chú phát triển: các sản phẩm StoreKit cục bộ này chưa đồng bộ App Store Connect. Sau này khi có Apple Developer account, tạo sản phẩm với đúng các Product ID này."))
+                        .font(.caption2)
+                        .foregroundStyle(LPTheme.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(18)
+            }
+            .navigationTitle("Plus")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(model.uiText("Done", "Xong")) { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct SpeechModelManagementCard: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "shippingbox.fill")
+                    .foregroundStyle(LPTheme.accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.uiText("Speech AI Model", "Model AI nhận dạng giọng nói"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(LPTheme.secondaryText)
+                }
+                Spacer()
+            }
+
+            switch model.modelInstallState {
+            case .notInstalled:
+                Text(model.uiText("Install Whisper Tiny once for fully local speech recognition. Your video is never part of this download.", "Cài Whisper Tiny một lần để nhận dạng giọng nói hoàn toàn cục bộ. Video của bạn không liên quan tới lượt tải này."))
+                    .font(.caption)
+                    .foregroundStyle(LPTheme.secondaryText)
+                LPPrimaryButton(title: model.uiText("Install Speech AI", "Cài Speech AI"), systemImage: "arrow.down.circle.fill") {
+                    model.installSpeechModel()
+                }
+            case .downloading(let progress):
+                ProgressView(value: progress)
+                    .tint(LPTheme.cyan)
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(LPTheme.secondaryText)
+                Button(model.uiText("Cancel download", "Hủy tải")) {
+                    model.cancelSpeechModelInstall()
+                }
+                .buttonStyle(.bordered)
+            case .installed:
+                Text(model.uiText("Activated for offline inference. Future transcription loads only the installed model and tokenizer cache.", "Đã kích hoạt cho inference offline. Các lần nhận dạng sau chỉ nạp model và tokenizer đã cài."))
+                    .font(.caption)
+                    .foregroundStyle(LPTheme.secondaryText)
+                Button(role: .destructive) {
+                    model.deleteSpeechModel()
+                } label: {
+                    Label(model.uiText("Delete model", "Xóa model"), systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canDeleteSpeechModel)
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                LPPrimaryButton(title: model.uiText("Retry install", "Thử cài lại"), systemImage: "arrow.clockwise") {
+                    model.installSpeechModel()
+                }
+            }
+        }
+        .lpCard()
+    }
+
+    private var statusText: String {
+        switch model.modelInstallState {
+        case .notInstalled:
+            model.uiText("Not installed", "Chưa cài")
+        case .downloading:
+            model.uiText("Downloading Whisper Tiny…", "Đang tải Whisper Tiny…")
+        case .installed(let bytes):
+            "Whisper Tiny · \(MediaFormatting.bytes(bytes)) · offline"
+        case .failed:
+            model.uiText("Install failed", "Cài đặt thất bại")
+        }
     }
 }
 

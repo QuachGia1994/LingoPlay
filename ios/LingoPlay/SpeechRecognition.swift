@@ -42,36 +42,41 @@ enum ASRError: LocalizedError {
 }
 
 struct ASRModelStore {
+    private static let activePointerName = "active-model.txt"
     private let fileManager = FileManager.default
 
-    func whisperModelFolder() -> URL? {
+    func whisperModel() -> InstalledWhisperModel? {
         guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let folder = support.appendingPathComponent("LingoPlay/Models/WhisperKit/current", isDirectory: true)
-        guard modelLooksUsable(at: folder) else { return nil }
-        return folder
+        let root = support.appendingPathComponent("LingoPlay/Models/WhisperKit", isDirectory: true)
+        let pointer = root.appendingPathComponent(Self.activePointerName)
+        guard let relative = try? String(contentsOf: pointer, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+              !relative.isEmpty,
+              !relative.hasPrefix("/"),
+              !relative.contains("..")
+        else { return nil }
+        let folder = root.appendingPathComponent(relative, isDirectory: true).standardizedFileURL
+        guard folder.path.hasPrefix(root.standardizedFileURL.path + "/"), coreModelLooksUsable(at: folder) else { return nil }
+        return InstalledWhisperModel(modelFolder: folder, tokenizerFolder: root)
     }
 
-    func modelLooksUsable(at folder: URL) -> Bool {
+    func coreModelLooksUsable(at folder: URL) -> Bool {
         guard let enumerator = fileManager.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) else { return false }
         let names = enumerator.compactMap { ($0 as? URL)?.lastPathComponent.lowercased() }
-        let hasCoreModels = names.contains(where: { $0.contains("melspectrogram") })
+        return names.contains(where: { $0.contains("melspectrogram") })
             && names.contains(where: { $0.contains("audioencoder") })
             && names.contains(where: { $0.contains("textdecoder") })
-        let hasLocalTokenizer = names.contains("tokenizer.json")
-            || names.contains("tokenizer_config.json")
-            || (names.contains("vocab.json") && names.contains("merges.txt"))
-        return hasCoreModels && hasLocalTokenizer
     }
 }
 
 protocol OnDeviceSpeechRecognizer: Sendable {
-    func transcribe(audioURL: URL, modelFolder: URL) async throws -> ASRTranscript
+    func transcribe(audioURL: URL, model: InstalledWhisperModel) async throws -> ASRTranscript
 }
 
 actor WhisperKitSpeechRecognizer: OnDeviceSpeechRecognizer {
-    func transcribe(audioURL: URL, modelFolder: URL) async throws -> ASRTranscript {
+    func transcribe(audioURL: URL, model: InstalledWhisperModel) async throws -> ASRTranscript {
         let pipe = try await WhisperKit(
-            modelFolder: modelFolder.path,
+            modelFolder: model.modelFolder.path,
+            tokenizerFolder: model.tokenizerFolder,
             verbose: false,
             prewarm: false,
             load: true,

@@ -98,7 +98,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,7 +119,6 @@ fun LingoPlayApp() {
     var stageName by rememberSaveable { mutableStateOf(Stage.SPLASH.name) }
     var tabName by rememberSaveable { mutableStateOf(Tab.HOME.name) }
     var audioBlend by rememberSaveable { mutableFloatStateOf(0.60f) }
-    var wifiOnly by rememberSaveable { mutableStateOf(true) }
     var bilingualSubtitles by rememberSaveable { mutableStateOf(true) }
     var selectedMedia by remember { mutableStateOf<LocalMediaItem?>(null) }
     var mediaState by rememberSaveable { mutableStateOf(MediaPreparationState.IDLE.name) }
@@ -144,7 +145,10 @@ fun LingoPlayApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val uiPreferences = remember(context) { context.getSharedPreferences("lingoplay_ui", Context.MODE_PRIVATE) }
+    var wifiOnly by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("wifi_only", true)) }
     var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
+    var modelInstallState by remember { mutableStateOf<ModelInstallState>(ASRModelInstaller.state(context)) }
+    var modelInstallJob by remember { mutableStateOf<Job?>(null) }
     var uiLanguageName by rememberSaveable {
         mutableStateOf(uiPreferences.getString("ui_language", UiLanguage.ENGLISH.name) ?: UiLanguage.ENGLISH.name)
     }
@@ -156,6 +160,43 @@ fun LingoPlayApp() {
     val translationPhase = TranslationPhase.valueOf(translationPhaseName)
     val ttsPhase = TTSPhase.valueOf(ttsPhaseName)
     val mixPhase = MixPhase.valueOf(mixPhaseName)
+    val modelInstalled = modelInstallState is ModelInstallState.Installed
+    val startModelInstall: () -> Unit = {
+        if (modelInstallJob == null) {
+            modelInstallJob = scope.launch {
+                try {
+                    val installed = ASRModelInstaller.install(context, wifiOnly) { progress ->
+                        withContext(Dispatchers.Main.immediate) { modelInstallState = progress }
+                    }
+                    modelInstallState = ModelInstallState.Installed(
+                        installed.encoder.length() + installed.decoder.length() + installed.tokens.length(),
+                    )
+                    if (stageName == Stage.PROCESSING.name && asrPhaseName == ASRPhase.MODEL_MISSING.name) {
+                        asrPhaseName = ASRPhase.IDLE.name
+                        mediaState = MediaPreparationState.READY.name
+                    }
+                } catch (cancelled: CancellationException) {
+                    modelInstallState = ASRModelInstaller.state(context)
+                    throw cancelled
+                } catch (error: Throwable) {
+                    modelInstallState = ModelInstallState.Failed(error.message ?: "Speech AI installation failed.")
+                } finally {
+                    modelInstallJob = null
+                }
+            }
+        }
+    }
+    val cancelModelInstall: () -> Unit = {
+        modelInstallJob?.cancel()
+    }
+    val deleteModel: () -> Unit = {
+        if (asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING) {
+            modelInstallJob?.cancel()
+            modelInstallJob = null
+            ASRModelInstaller.deleteInstalled(context)
+            modelInstallState = ModelInstallState.NotInstalled
+        }
+    }
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -201,7 +242,7 @@ fun LingoPlayApp() {
         }
     }
 
-    LaunchedEffect(stageName, selectedMedia?.uri) {
+    LaunchedEffect(stageName, selectedMedia?.uri, modelInstalled) {
         val media = selectedMedia
         if (stageName == Stage.PROCESSING.name && media != null && mediaState == MediaPreparationState.READY.name) {
             mediaState = MediaPreparationState.EXTRACTING_AUDIO.name
@@ -350,6 +391,9 @@ fun LingoPlayApp() {
                         mixPhase = mixPhase,
                         mixResult = mixResult,
                         mixError = mixError,
+                        modelInstallState = modelInstallState,
+                        onInstallModel = startModelInstall,
+                        onCancelModel = cancelModelInstall,
                         onBack = { stageName = Stage.HOME.name },
                     )
 
@@ -409,6 +453,11 @@ fun LingoPlayApp() {
                             highContrast = highContrast,
                             wifiOnly = wifiOnly,
                             bilingualSubtitles = bilingualSubtitles,
+                            modelInstallState = modelInstallState,
+                            canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
+                            onInstallModel = startModelInstall,
+                            onCancelModel = cancelModelInstall,
+                            onDeleteModel = deleteModel,
                             onToggleAppearance = {
                                 highContrast = !highContrast
                                 uiPreferences.edit { putBoolean("high_contrast", highContrast) }
@@ -418,7 +467,10 @@ fun LingoPlayApp() {
                                 uiLanguageName = next.name
                                 uiPreferences.edit { putString("ui_language", next.name) }
                             },
-                            onWifiOnlyChange = { wifiOnly = it },
+                            onWifiOnlyChange = {
+                                wifiOnly = it
+                                uiPreferences.edit { putBoolean("wifi_only", it) }
+                            },
                             onBilingualSubtitlesChange = { bilingualSubtitles = it },
                         )
                     }
@@ -570,6 +622,9 @@ private fun ProcessingScreen(
     mixPhase: MixPhase,
     mixResult: LocalDubMediaResult?,
     mixError: String?,
+    modelInstallState: ModelInstallState,
+    onInstallModel: () -> Unit,
+    onCancelModel: () -> Unit,
     onBack: () -> Unit,
 ) {
     ScreenScroll {
@@ -638,7 +693,35 @@ private fun ProcessingScreen(
 
         if (asrPhase == ASRPhase.MODEL_MISSING) {
             LpCard {
-                Text("Speech model is not installed. LingoPlay will not download a large model without an explicit model-install action.", color = LpSecondaryText, fontSize = 12.sp)
+                Text("Speech AI model required", fontWeight = FontWeight.Bold)
+                Text(
+                    "Install Whisper Tiny once to continue local speech recognition. The model download is separate from your video; video and audio never leave this device.",
+                    color = LpSecondaryText,
+                    fontSize = 12.sp,
+                )
+                when (modelInstallState) {
+                    is ModelInstallState.Downloading -> {
+                        val progress = modelInstallState.progress
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = LpCyan,
+                            trackColor = LpSurfaceStrong,
+                        )
+                        Text(
+                            "${(progress * 100).toInt()}% · ${MediaFormatting.bytes(modelInstallState.bytesDone)} / ${MediaFormatting.bytes(modelInstallState.bytesTotal)}",
+                            color = LpSecondaryText,
+                            fontSize = 11.sp,
+                        )
+                        TextButton(onClick = onCancelModel) { Text("Cancel download") }
+                    }
+                    is ModelInstallState.Installed -> Text("Speech AI installed. Processing is resuming…", color = LpCyan, fontSize = 12.sp)
+                    is ModelInstallState.Failed -> {
+                        Text(modelInstallState.message, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        PrimaryAction("Retry Speech AI download", Icons.Rounded.Download, onInstallModel)
+                    }
+                    ModelInstallState.NotInstalled -> PrimaryAction("Install Speech AI · ~104 MB", Icons.Rounded.Download, onInstallModel)
+                }
             }
         }
 
@@ -1008,6 +1091,11 @@ private fun SettingsScreen(
     highContrast: Boolean,
     wifiOnly: Boolean,
     bilingualSubtitles: Boolean,
+    modelInstallState: ModelInstallState,
+    canDeleteModel: Boolean,
+    onInstallModel: () -> Unit,
+    onCancelModel: () -> Unit,
+    onDeleteModel: () -> Unit,
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
@@ -1057,8 +1145,56 @@ private fun SettingsScreen(
         }
 
         LpCard {
-            SettingsValueRow(Icons.Rounded.Storage, language.text("Downloaded AI Models", "Model AI đã tải"), language.text("Not installed", "Chưa cài"))
-            CardDivider()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Rounded.Storage, contentDescription = null, tint = LpCyan, modifier = Modifier.size(21.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(language.text("Speech AI Model", "Model AI nhận dạng giọng nói"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when (modelInstallState) {
+                            is ModelInstallState.Installed -> language.text("Whisper Tiny · ${MediaFormatting.bytes(modelInstallState.bytes)} · offline", "Whisper Tiny · ${MediaFormatting.bytes(modelInstallState.bytes)} · offline")
+                            is ModelInstallState.Downloading -> language.text("Downloading…", "Đang tải…")
+                            is ModelInstallState.Failed -> language.text("Install failed", "Cài đặt thất bại")
+                            ModelInstallState.NotInstalled -> language.text("Not installed", "Chưa cài")
+                        },
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+            when (modelInstallState) {
+                is ModelInstallState.Downloading -> {
+                    LinearProgressIndicator(
+                        progress = { modelInstallState.progress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = LpCyan,
+                        trackColor = LpSurfaceStrong,
+                    )
+                    Text(
+                        "${(modelInstallState.progress * 100).toInt()}% · ${MediaFormatting.bytes(modelInstallState.bytesDone)} / ${MediaFormatting.bytes(modelInstallState.bytesTotal)}",
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                    TextButton(onClick = onCancelModel) { Text(language.text("Cancel download", "Hủy tải")) }
+                }
+                is ModelInstallState.Installed -> {
+                    Text(
+                        language.text("Used only for on-device speech recognition. Inference does not download anything after activation.", "Chỉ dùng để nhận dạng giọng nói trên thiết bị. Sau khi kích hoạt, inference không tải thêm dữ liệu."),
+                        color = LpSecondaryText,
+                        fontSize = 11.sp,
+                    )
+                    TextButton(onClick = onDeleteModel, enabled = canDeleteModel) {
+                        Text(language.text("Delete model", "Xóa model"))
+                    }
+                }
+                is ModelInstallState.Failed -> {
+                    Text(modelInstallState.message, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                    PrimaryAction(language.text("Retry install", "Thử cài lại"), Icons.Rounded.Download, onInstallModel)
+                }
+                ModelInstallState.NotInstalled -> PrimaryAction(language.text("Install Speech AI · ~104 MB", "Cài Speech AI · ~104 MB"), Icons.Rounded.Download, onInstallModel)
+            }
+        }
+
+        LpCard {
             SettingsValueRow(Icons.Rounded.Info, language.text("About LingoPlay", "Giới thiệu LingoPlay"), "Foundation")
         }
     }
