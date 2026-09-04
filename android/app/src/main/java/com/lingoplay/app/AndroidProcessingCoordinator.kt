@@ -166,7 +166,7 @@ internal class AndroidProcessingCoordinator(
         val audioFile = prepareAudio(media, reusableAudio, config, onEvent)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.AUDIO, "Audio preparation failed.")
 
-        val model = runtime.findWhisperModel() ?: return ProcessingOutcome.ModelMissing
+        val model = findWhisperModel() ?: return ProcessingOutcome.ModelMissing
         val transcript = transcribe(audioFile, model, config, onEvent)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.ASR, "Speech recognition failed.")
 
@@ -211,6 +211,17 @@ internal class AndroidProcessingCoordinator(
             runtime.record("audio_preparation_failed")
             throw ProcessingStepException(ProcessingFailureStep.AUDIO, error.message ?: "Audio preparation failed.", error)
         }
+    }
+
+    private fun findWhisperModel(): SherpaWhisperModel? = try {
+        runtime.findWhisperModel()
+    } catch (error: Throwable) {
+        runtime.record("asr_model_lookup_failed")
+        throw ProcessingStepException(
+            ProcessingFailureStep.ASR,
+            error.message ?: "Speech recognition model lookup failed.",
+            error,
+        )
     }
 
     private suspend fun transcribe(

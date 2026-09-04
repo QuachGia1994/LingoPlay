@@ -175,7 +175,7 @@ struct HomeView: View {
     }
 }
 
-private struct SavedVideoRow: View {
+struct SavedVideoRow: View {
     let item: LocalLibraryItem
     let shareURL: URL?
     let onDelete: (() -> Void)?

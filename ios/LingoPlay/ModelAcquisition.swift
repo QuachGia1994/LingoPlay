@@ -49,8 +49,9 @@ actor WhisperModelInstaller {
         wifiOnly: Bool,
         progress: @escaping @Sendable (Double) async -> Void
     ) async throws -> InstalledWhisperModel {
-        if wifiOnly && !(await ModelNetworkPolicy.isUsingWiFi()) {
-            throw ModelAcquisitionError.wifiRequired
+        if wifiOnly {
+            let usingWiFi = await ModelNetworkPolicy.isUsingWiFi()
+            guard usingWiFi else { throw ModelAcquisitionError.wifiRequired }
         }
 
         var root = try modelRoot()

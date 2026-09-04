@@ -40,6 +40,36 @@ class AndroidProcessingCoordinatorTest {
     }
 
     @Test
+    fun modelLookupFailureIsAttributedToAsrInsteadOfEscapingCoordinator() = runBlocking {
+        val root = createTempDirectory("lingoplay-coordinator-").toFile()
+        try {
+            val runtime = FakeRuntime(root, modelFailure = IllegalStateException("model registry unavailable"))
+            val coordinator = AndroidProcessingCoordinator(runtime, translationConfigured = true)
+            val media = LocalMediaItem(Uri.EMPTY, "sample.mp4", 2_000, 10, true)
+            val config = ProcessingConfig(
+                SourceLanguageChoice.AUTO,
+                TargetLanguageChoice.VIETNAMESE,
+                null,
+                DubbingModePreset.BALANCED,
+                SubtitleMode.BILINGUAL,
+            )
+
+            val outcome = coordinator.run(media, reusableAudio = null, config = config) { }
+
+            assertTrue(outcome is ProcessingOutcome.Failed)
+            val failed = outcome as ProcessingOutcome.Failed
+            assertEquals(ProcessingFailureStep.ASR, failed.step)
+            assertEquals("model registry unavailable", failed.message)
+            assertEquals(
+                listOf("extract", "checkpoint", "model", "record:asr_model_lookup_failed"),
+                runtime.calls,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun missingTranslationEndpointStopsBeforeNetworkAndTts() = runBlocking {
         val root = createTempDirectory("lingoplay-coordinator-").toFile()
         try {
@@ -63,7 +93,10 @@ class AndroidProcessingCoordinatorTest {
         }
     }
 
-    private class FakeRuntime(private val root: File) : AndroidProcessingRuntime {
+    private class FakeRuntime(
+        private val root: File,
+        private val modelFailure: Throwable? = null,
+    ) : AndroidProcessingRuntime {
         val calls = mutableListOf<String>()
         private val audio = File(root, "audio.wav").apply { writeBytes(byteArrayOf(1)) }
         private val encoder = File(root, "encoder.onnx").apply { writeBytes(byteArrayOf(1)) }
@@ -79,6 +112,7 @@ class AndroidProcessingCoordinatorTest {
 
         override fun findWhisperModel(): SherpaWhisperModel? {
             calls += "model"
+            modelFailure?.let { throw it }
             return SherpaWhisperModel(encoder, decoder, tokens)
         }
 

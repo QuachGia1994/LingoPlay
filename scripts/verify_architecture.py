@@ -56,6 +56,8 @@ android_root = (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPlayApp
 require("fun SplashScreen(" not in android_root, "Android root does not render SplashScreen")
 require("fun ProcessingScreen(" not in android_root, "Android root does not define ProcessingScreen")
 require("fun SingleClockDubPlayer(" not in android_root, "Android root does not own player rendering")
+require("LaunchedEffect(stageName, selectedMedia?.uri" not in android_root, "Android processing effect is not keyed by mutable media URI")
+require("BackHandler(enabled = stage != Stage.HOME" in android_root, "Android root handles system Back for staged navigation")
 for forbidden in (
     "SherpaWhisperSpeechRecognizer.transcribe(",
     "TranslationService.translate(",
@@ -77,6 +79,10 @@ require(playback_extension.is_file(), "iOS playback presentation extension exist
 require((ROOT / "ios/LingoPlay/PlaybackPresentationPolicy.swift").is_file(), "iOS playback presentation policy exists")
 require((ROOT / "android/app/src/main/java/com/lingoplay/app/PlayerInteractionPolicy.kt").is_file(), "Android player interaction policy exists")
 require((ROOT / "ios/LingoPlayTests/PolicyTests.swift").is_file(), "iOS policy unit tests exist")
+home_prepare = (ROOT / "ios/LingoPlay/HomePrepareViews.swift").read_text(encoding="utf-8")
+model_acquisition = (ROOT / "ios/LingoPlay/ModelAcquisition.swift").read_text(encoding="utf-8")
+require("private struct SavedVideoRow" not in home_prepare, "iOS shared SavedVideoRow is cross-file accessible")
+require("wifiOnly && !(await" not in model_acquisition, "iOS Wi-Fi async check avoids boolean autoclosure await")
 for verifier in ("verify_ios_source_hardening.py", "verify_ios_build_settings.py", "verify_ios_binary.py"):
     require((ROOT / "scripts" / verifier).is_file(), f"iOS release verifier exists: {verifier}")
 

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Rational
 import android.widget.VideoView
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -291,7 +292,7 @@ fun LingoPlayApp() {
         )
     }
 
-    LaunchedEffect(stageName, selectedMedia?.uri, modelInstalled) {
+    LaunchedEffect(stageName, modelInstalled) {
         processingGate.run {
             val media = selectedMedia
             val reusableAudio = preparedAudioFile?.takeIf(File::isFile)
@@ -301,6 +302,10 @@ fun LingoPlayApp() {
             if (stageName != Stage.PROCESSING.name || media == null || !canProcess) return@run
 
             mediaError = null
+            asrError = null
+            translationError = null
+            ttsError = null
+            mixError = null
             val outcome = processingCoordinator.run(
                 media = media,
                 reusableAudio = reusableAudio,
@@ -390,10 +395,34 @@ fun LingoPlayApp() {
                     dubSpeechDocument = outcome.dub
                     mixResult = outcome.saved.asProcessedResult()
                     mixPhaseName = MixPhase.COMPLETED.name
-                    delay(300)
                     stageName = Stage.PLAYER.name
                 }
             }
+        }
+    }
+
+    val backFromPrepare: () -> Unit = {
+        preparedAudioFile?.delete()
+        preparedAudioFile = null
+        ProcessingCheckpointStore.clear(context, deleteMedia = true)
+        LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
+        selectedMedia = null
+        activeProcessingConfig = null
+        mediaState = MediaPreparationState.IDLE.name
+        stageName = Stage.HOME.name
+    }
+    val backFromProcessing: () -> Unit = {
+        pendingRecovery = ProcessingCheckpointStore.load(context)
+        stageName = Stage.HOME.name
+    }
+    val backToHome: () -> Unit = { stageName = Stage.HOME.name }
+
+    BackHandler(enabled = stage != Stage.HOME && stage != Stage.SPLASH) {
+        when (stage) {
+            Stage.PREPARE -> backFromPrepare()
+            Stage.PROCESSING -> backFromProcessing()
+            Stage.PLAYER, Stage.PLUS, Stage.ABOUT -> backToHome()
+            Stage.SPLASH, Stage.HOME -> Unit
         }
     }
 
@@ -442,16 +471,7 @@ fun LingoPlayApp() {
                         onVoice = cycleVoice,
                         onDubbingMode = cycleDubbingMode,
                         onSubtitleMode = cycleSubtitleMode,
-                        onBack = {
-                            preparedAudioFile?.delete()
-                            preparedAudioFile = null
-                            ProcessingCheckpointStore.clear(context, deleteMedia = true)
-                            LocalMediaRepository.deleteOwnedImport(context, selectedMedia)
-                            selectedMedia = null
-                            activeProcessingConfig = null
-                            mediaState = MediaPreparationState.IDLE.name
-                            stageName = Stage.HOME.name
-                        },
+                        onBack = backFromPrepare,
                         onEdit = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onTranslate = {
                             val media = selectedMedia
@@ -489,10 +509,7 @@ fun LingoPlayApp() {
                         modelInstallState = modelInstallState,
                         onInstallModel = startModelInstall,
                         onCancelModel = cancelModelInstall,
-                        onBack = {
-                            pendingRecovery = ProcessingCheckpointStore.load(context)
-                            stageName = Stage.HOME.name
-                        },
+                        onBack = backFromProcessing,
                     )
 
                     Stage.PLAYER -> PlayerScreen(
@@ -519,7 +536,7 @@ fun LingoPlayApp() {
                                 context.startActivity(Intent.createChooser(LocalLibraryStore.shareIntent(context, item), "Share dubbed video"))
                             }
                         },
-                        onBack = { stageName = Stage.HOME.name },
+                        onBack = backToHome,
                     )
 
                     Stage.HOME -> when (tab) {
@@ -535,10 +552,23 @@ fun LingoPlayApp() {
                                 preparedAudioFile = checkpoint.preparedAudioFile
                                 activeProcessingConfig = checkpoint.config ?: currentProcessingConfig
                                 mediaState = if (checkpoint.canResumeFromAudio) MediaPreparationState.AUDIO_READY.name else MediaPreparationState.READY.name
+                                mediaError = null
                                 asrPhaseName = ASRPhase.IDLE.name
+                                asrTranscript = null
+                                asrError = null
                                 translationPhaseName = TranslationPhase.IDLE.name
+                                translationDocument = null
+                                translationError = null
+                                translationBatch = 0
+                                translationBatchTotal = 0
                                 ttsPhaseName = TTSPhase.IDLE.name
+                                dubSpeechDocument = null
+                                ttsError = null
+                                ttsSegment = 0
+                                ttsSegmentTotal = 0
                                 mixPhaseName = MixPhase.IDLE.name
+                                mixResult = null
+                                mixError = null
                                 pendingRecovery = null
                                 stageName = Stage.PROCESSING.name
                             },
@@ -621,14 +651,14 @@ fun LingoPlayApp() {
                     Stage.PLUS -> PlusScreen(
                         language = uiLanguage,
                         store = plusStore,
-                        onBack = { stageName = Stage.HOME.name },
+                        onBack = backToHome,
                     )
 
                     Stage.ABOUT -> AboutScreen(
                         language = uiLanguage,
                         diagnosticsCount = LocalDiagnostics.recent(context).size,
                         cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
-                        onBack = { stageName = Stage.HOME.name },
+                        onBack = backToHome,
                     )
                 }
             }
