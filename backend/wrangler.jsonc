@@ -3,6 +3,9 @@
   "name": "lingoplay-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-03",
+  "ai": {
+    "binding": "AI"
+  },
   "observability": {
     "enabled": true
   }

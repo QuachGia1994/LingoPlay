@@ -1,4 +1,16 @@
+export interface WorkersAITranslationInput {
+  text: string;
+  source_lang: string;
+  target_lang: string;
+}
+
+export interface WorkersAI {
+  run(model: string, input: WorkersAITranslationInput): Promise<unknown>;
+}
+
 export interface Env {
+  AI?: WorkersAI;
+  // Legacy provider proxy remains supported for self-hosted deployments.
   TRANSLATION_PROVIDER_URL?: string;
   TRANSLATION_PROVIDER_KEY?: string;
 }
@@ -109,6 +121,35 @@ async function parseJsonBody(request: Request): Promise<{ ok: true; value: unkno
   }
 }
 
+function translatedTextFromWorkersAI(value: unknown): string | null {
+  if (!isObject(value) || typeof value.translated_text !== "string") return null;
+  const text = value.translated_text.trim();
+  return text.length > 0 ? text : null;
+}
+
+async function translateWithWorkersAI(request: TranslationRequest, ai: WorkersAI): Promise<ProviderResponse> {
+  if (request.sourceLanguage === "und") throw new Error("source_language_unknown");
+
+  const translations: ProviderTranslation[] = [];
+  const concurrency = 8;
+  for (let offset = 0; offset < request.segments.length; offset += concurrency) {
+    const page = request.segments.slice(offset, offset + concurrency);
+    const pageTranslations = await Promise.all(page.map(async (segment) => {
+      const response = await ai.run("@cf/meta/m2m100-1.2b", {
+        text: segment.text,
+        source_lang: request.sourceLanguage,
+        target_lang: request.targetLanguage,
+      });
+      const text = translatedTextFromWorkersAI(response);
+      if (!text) throw new Error("provider_invalid_shape");
+      return { id: segment.id, text };
+    }));
+    translations.push(...pageTranslations);
+  }
+
+  return { translations };
+}
+
 function validateProviderResponse(value: unknown, request: TranslationRequest): ProviderResponse | null {
   if (!isObject(value) || !Array.isArray(value.translations) || value.translations.length !== request.segments.length) return null;
   const expectedIds = new Set(request.segments.map((segment) => segment.id));
@@ -133,34 +174,46 @@ async function translate(request: Request, env: Env): Promise<Response> {
   const validated = validateTranslationPayload(parsed.value);
   if (!validated.ok) return json({ error: validated.error }, 400);
 
-  if (!env.TRANSLATION_PROVIDER_URL || !env.TRANSLATION_PROVIDER_KEY) {
+  let normalized: ProviderResponse | null = null;
+
+  if (env.AI) {
+    try {
+      normalized = await translateWithWorkersAI(validated.data, env.AI);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "provider_failed";
+      if (code === "source_language_unknown") return json({ error: code }, 422);
+      if (code === "provider_invalid_shape") return json({ error: code }, 502);
+      return json({ error: "provider_unreachable" }, 502);
+    }
+  } else if (env.TRANSLATION_PROVIDER_URL && env.TRANSLATION_PROVIDER_KEY) {
+    let providerResponse: Response;
+    try {
+      providerResponse = await fetch(env.TRANSLATION_PROVIDER_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.TRANSLATION_PROVIDER_KEY}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(validated.data),
+      });
+    } catch {
+      return json({ error: "provider_unreachable" }, 502);
+    }
+
+    if (!providerResponse.ok) return json({ error: "provider_failed", status: providerResponse.status }, 502);
+
+    let providerJson: unknown;
+    try {
+      providerJson = await providerResponse.json();
+    } catch {
+      return json({ error: "provider_invalid_json" }, 502);
+    }
+
+    normalized = validateProviderResponse(providerJson, validated.data);
+  } else {
     return json({ error: "provider_not_configured" }, 503);
   }
 
-  let providerResponse: Response;
-  try {
-    providerResponse = await fetch(env.TRANSLATION_PROVIDER_URL, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${env.TRANSLATION_PROVIDER_KEY}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(validated.data),
-    });
-  } catch {
-    return json({ error: "provider_unreachable" }, 502);
-  }
-
-  if (!providerResponse.ok) return json({ error: "provider_failed", status: providerResponse.status }, 502);
-
-  let providerJson: unknown;
-  try {
-    providerJson = await providerResponse.json();
-  } catch {
-    return json({ error: "provider_invalid_json" }, 502);
-  }
-
-  const normalized = validateProviderResponse(providerJson, validated.data);
   if (!normalized) return json({ error: "provider_invalid_shape" }, 502);
 
   return json({

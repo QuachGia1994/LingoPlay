@@ -17,6 +17,8 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    env:
+      ORG_GRADLE_PROJECT_LINGOPLAY_TRANSLATION_API_BASE_URL: ${{ vars.LINGOPLAY_TRANSLATION_API_BASE_URL }}
     defaults:
       run:
         working-directory: android
@@ -45,6 +47,10 @@ jobs:
 
       - name: Verify wrapper
         run: ./gradlew --version
+
+      - name: Verify translation backend wiring
+        shell: bash
+        run: test -n "$ORG_GRADLE_PROJECT_LINGOPLAY_TRANSLATION_API_BASE_URL"
 
       - name: Verify release privacy/security config
         working-directory: .

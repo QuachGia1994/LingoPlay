@@ -103,5 +103,13 @@ require("verify_ios_binary.py" in ios_workflow, "iOS CI audits built Mach-O/dSYM
 require("LingoPlay-iOS-dSYM" in ios_workflow, "iOS CI publishes dSYM artifact")
 require("LingoPlay-iOS-release-reports" in ios_workflow, "iOS CI publishes release reports")
 require("compileDebugAndroidTestKotlin" in android_workflow, "Android CI compiles instrumentation tests")
+require("ORG_GRADLE_PROJECT_LINGOPLAY_TRANSLATION_API_BASE_URL" in android_workflow, "Android CI injects translation backend URL")
+require("LINGOPLAY_TRANSLATION_API_BASE_URL" in ios_workflow, "iOS CI injects translation backend URL")
+require("Verify translation backend wiring" in android_workflow, "Android CI fails closed when translation backend URL is missing")
+require("Verify translation backend wiring" in ios_workflow, "iOS CI fails closed when translation backend URL is missing")
+wrangler_spec = (ROOT / "backend/wrangler.jsonc").read_text(encoding="utf-8")
+require('"binding": "AI"' in wrangler_spec, "Cloudflare Worker keeps Workers AI binding")
+backend_source = (ROOT / "backend/src/index.ts").read_text(encoding="utf-8")
+require('@cf/meta/m2m100-1.2b' in backend_source, "backend translation uses pinned Workers AI model")
 
 print("Architecture verification PASSED")

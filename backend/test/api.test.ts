@@ -53,6 +53,64 @@ test("translation fails explicitly when provider secrets are absent", async () =
   assert.deepEqual(await response.json(), { error: "provider_not_configured" });
 });
 
+test("Workers AI translation preserves ids and sends text only", async () => {
+  const calls: Array<{ model: string; text: string; source_lang: string; target_lang: string }> = [];
+  const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceLanguage: "en",
+      targetLanguage: "vi",
+      segments: [
+        { id: "s1", startMs: 0, endMs: 1400, text: "Hello world" },
+        { id: "s2", startMs: 1400, endMs: 3100, text: "This is LingoPlay" },
+      ],
+    }),
+  }), {
+    AI: {
+      run: async (model, input) => {
+        calls.push({ model, ...input });
+        return { translated_text: input.text === "Hello world" ? "Xin chào thế giới" : "Đây là LingoPlay" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as { translations: Array<{ id: string; text: string }> };
+  assert.deepEqual(body.translations, [
+    { id: "s1", text: "Xin chào thế giới" },
+    { id: "s2", text: "Đây là LingoPlay" },
+  ]);
+  assert.deepEqual(calls, [
+    { model: "@cf/meta/m2m100-1.2b", text: "Hello world", source_lang: "en", target_lang: "vi" },
+    { model: "@cf/meta/m2m100-1.2b", text: "This is LingoPlay", source_lang: "en", target_lang: "vi" },
+  ]);
+});
+
+test("Workers AI rejects unknown source language instead of assuming English", async () => {
+  let called = false;
+  const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceLanguage: "und",
+      targetLanguage: "vi",
+      segments: [{ id: "s1", startMs: 0, endMs: 2200, text: "Hello world" }],
+    }),
+  }), {
+    AI: {
+      run: async () => {
+        called = true;
+        return { translated_text: "should not run" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(await response.json(), { error: "source_language_unknown" });
+  assert.equal(called, false);
+});
+
 test("translation proxy forwards transcript JSON only and preserves ids", async () => {
   const originalFetch = globalThis.fetch;
   let providerBody: unknown;
