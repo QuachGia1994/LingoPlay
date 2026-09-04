@@ -114,6 +114,11 @@ struct ProcessingConfig: Sendable, Equatable {
 enum DubbingPreferencePolicy {
     static let playbackSpeeds: [Double] = [0.75, 1.0, 1.25, 1.5]
 
+    static func sanitizedPlaybackSpeed(_ value: Double?) -> Double {
+        guard let value, value.isFinite, playbackSpeeds.contains(value) else { return 1.0 }
+        return value
+    }
+
     static func nextPlaybackSpeed(after current: Double) -> Double {
         let nearest = playbackSpeeds.enumerated().min { abs($0.element - current) < abs($1.element - current) }?.offset ?? 1
         return playbackSpeeds[(nearest + 1) % playbackSpeeds.count]

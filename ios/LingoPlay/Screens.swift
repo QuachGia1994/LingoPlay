@@ -766,14 +766,14 @@ struct PlayerView: View {
                         EmptyView()
                     case .translated:
                         VStack(alignment: .leading, spacing: 12) {
-                            SubtitleLine(language: model.targetLanguageChoice.code.uppercased(), text: model.activeTranslationSegment?.translatedText ?? "—")
+                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
                         }
                         .lpCard()
                     case .bilingual:
                         VStack(alignment: .leading, spacing: 12) {
-                            SubtitleLine(language: model.sourceLanguageChoice.code?.uppercased() ?? "SRC", text: model.activeTranslationSegment?.sourceText ?? "—")
+                            SubtitleLine(language: model.activeSubtitleSourceLanguage, text: model.activeTranslationSegment?.sourceText ?? "—")
                             Divider().overlay(LPTheme.border)
-                            SubtitleLine(language: model.targetLanguageChoice.code.uppercased(), text: model.activeTranslationSegment?.translatedText ?? "—")
+                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
                         }
                         .lpCard()
                     }

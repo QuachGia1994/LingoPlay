@@ -35,7 +35,9 @@ final class AppModel {
     var audioBlend = 0.60 {
         didSet { updatePlayerMix() }
     }
-    var playbackSpeed = UserDefaults.standard.object(forKey: "lingoplay.playbackSpeed") as? Double ?? 1.0 {
+    var playbackSpeed = DubbingPreferencePolicy.sanitizedPlaybackSpeed(
+        UserDefaults.standard.object(forKey: "lingoplay.playbackSpeed") as? Double
+    ) {
         didSet {
             UserDefaults.standard.set(playbackSpeed, forKey: "lingoplay.playbackSpeed")
             applyPlaybackSpeed()
@@ -501,6 +503,20 @@ final class AppModel {
         return document.segments.last { positionMs >= $0.startMs && positionMs <= $0.endMs }
     }
 
+    var activeSubtitleSourceLanguage: String {
+        if case .completed(let document) = translationState {
+            return document.sourceLanguage.uppercased()
+        }
+        return sourceLanguageChoice.code?.uppercased() ?? "SRC"
+    }
+
+    var activeSubtitleTargetLanguage: String {
+        if case .completed(let document) = translationState {
+            return document.targetLanguage.uppercased()
+        }
+        return targetLanguageChoice.code.uppercased()
+    }
+
     private func configurePlayback(with result: LocalDubMediaResult, dub: DubSpeechDocument, mode: DubbingModePreset) async throws {
         guard let selectedMedia else { return }
         teardownPlayback()
@@ -514,6 +530,7 @@ final class AppModel {
             mode: mode
         )
         let player = AVPlayer(playerItem: session.item)
+        player.defaultRate = Float(playbackSpeed)
         videoPlayer = player
         playbackMixContext = session.mixContext
         liveBlendAvailable = true
@@ -527,6 +544,7 @@ final class AppModel {
         teardownPlayback()
         try? preparePlaybackAudioSession()
         let player = AVPlayer(url: url)
+        player.defaultRate = Float(playbackSpeed)
         videoPlayer = player
         playbackDuration = max(0, duration)
         playbackPosition = 0
@@ -567,8 +585,11 @@ final class AppModel {
 
     private func applyPlaybackSpeed() {
         guard let videoPlayer else { return }
-        if isPlaying {
-            videoPlayer.playImmediately(atRate: Float(playbackSpeed))
+        let rate = Float(playbackSpeed)
+        videoPlayer.defaultRate = rate
+        if videoPlayer.timeControlStatus == .playing || videoPlayer.rate != 0 {
+            videoPlayer.playImmediately(atRate: rate)
+            isPlaying = true
         }
     }
 

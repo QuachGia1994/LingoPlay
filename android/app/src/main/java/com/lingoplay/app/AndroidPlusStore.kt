@@ -39,6 +39,21 @@ data class AndroidPlusProduct(
     internal val offerToken: String,
 )
 
+internal class PurchaseAcknowledgementGate {
+    private val inFlightTokens = mutableSetOf<String>()
+
+    fun tryBegin(token: String, alreadyAcknowledged: Boolean): Boolean =
+        !alreadyAcknowledged && inFlightTokens.add(token)
+
+    fun finish(token: String) {
+        inFlightTokens.remove(token)
+    }
+
+    fun clear() {
+        inFlightTokens.clear()
+    }
+}
+
 class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
     companion object {
         const val WEEKLY_ID = "com.lingoplay.plus.weekly"
@@ -57,6 +72,7 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
 
     private var connecting = false
     private var shouldStayConnected = false
+    private val acknowledgementGate = PurchaseAcknowledgementGate()
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectAction = Runnable { if (shouldStayConnected) start() }
 
@@ -107,6 +123,7 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
         shouldStayConnected = false
         connecting = false
         reconnectHandler.removeCallbacks(reconnectAction)
+        acknowledgementGate.clear()
         billingClient.endConnection()
     }
 
@@ -233,11 +250,14 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
         }
         message = if (pending && !isPlus) "Purchase pending in Google Play. Plus unlocks only after payment completes." else null
 
-        purchased.filterNot(Purchase::isAcknowledged).forEach { purchase ->
+        purchased.forEach { purchase ->
+            val token = purchase.purchaseToken
+            if (!acknowledgementGate.tryBegin(token, purchase.isAcknowledged)) return@forEach
             val params = AcknowledgePurchaseParams.newBuilder()
-                .setPurchaseToken(purchase.purchaseToken)
+                .setPurchaseToken(token)
                 .build()
             billingClient.acknowledgePurchase(params) { result ->
+                acknowledgementGate.finish(token)
                 if (result.responseCode != BillingClient.BillingResponseCode.OK) {
                     message = "Plus is active locally, but Google Play acknowledgement will be retried on next refresh."
                 }

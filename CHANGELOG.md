@@ -73,4 +73,7 @@ All notable changes to LingoPlay are documented here.
 - Post-Stage-14 risk hardening snapshots source/target/voice/dubbing/subtitle configuration once per processing run, persists that immutable snapshot in Android/iOS recovery checkpoints, and reuses it after Resume so Settings changes cannot mix languages or audio policy across one job.
 - Library metadata now records the generation dubbing mode. Android Player shows the saved mode for new items and an explicit legacy final-mix state for older items instead of relabeling them from current Settings; iOS fresh live-blend playback also receives the exact render-time mode.
 - Android Billing connection startup is serialized, service disconnects schedule one reconnect, app-root disposal closes BillingClient, and multi-offer products prefer the base-plan offer rather than arbitrary first-offer ordering.
+- Android now reconciles Plus entitlement on app-root startup, suppresses misleading Retry UI while Billing is still connecting/loading, and deduplicates in-flight purchase acknowledgements.
+- Android MediaPlayer speed changes no longer apply non-zero PlaybackParams while paused/preparing; seek controls are disabled until the player is ready.
+- iOS subtitle language badges now come from the active saved TranslationDocument, while AVPlayer defaultRate follows the persisted playback-speed preference across system/PiP resume. Invalid persisted rates fall back to 1.0x.
 - Subtitle lookup now includes the exact segment end timestamp consistently on Android and iOS.

@@ -313,6 +313,7 @@ fun LingoPlayApp() {
     }
 
     LaunchedEffect(Unit) {
+        plusStore.start()
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
         offlineVoices = runCatching { SystemVietnameseTTSService.availableOfflineVoices(context) }.getOrDefault(emptyList())
@@ -1211,8 +1212,9 @@ private fun SingleClockDubPlayer(
     var isPlaying by remember { mutableStateOf(false) }
     var currentMs by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(playbackSpeed, mediaPlayer) {
-        mediaPlayer?.let { player ->
+    LaunchedEffect(playbackSpeed, mediaPlayer, isPlaying) {
+        val player = mediaPlayer
+        if (player != null && isPlaying) {
             runCatching { player.playbackParams = player.playbackParams.setSpeed(playbackSpeed) }
         }
     }
@@ -1249,7 +1251,6 @@ private fun SingleClockDubPlayer(
                     setOnPreparedListener { player ->
                         mediaPlayer = player
                         videoReady = true
-                        runCatching { player.playbackParams = player.playbackParams.setSpeed(playbackSpeed) }
                         onPipAvailabilityChange(false)
                     }
                     setOnCompletionListener {
@@ -1275,7 +1276,7 @@ private fun SingleClockDubPlayer(
             Icon(
                 Icons.Rounded.Replay10,
                 contentDescription = "Back 10 seconds",
-                modifier = Modifier.clickable {
+                modifier = Modifier.clickable(enabled = videoReady) {
                     val target = (currentMs - 10_000).coerceAtLeast(0)
                     videoView?.seekTo(target)
                     currentMs = target
@@ -1295,6 +1296,9 @@ private fun SingleClockDubPlayer(
                         } else {
                             view.start()
                             isPlaying = true
+                            mediaPlayer?.let { player ->
+                                runCatching { player.playbackParams = player.playbackParams.setSpeed(playbackSpeed) }
+                            }
                             onPipAvailabilityChange(true)
                         }
                     },
@@ -1302,7 +1306,7 @@ private fun SingleClockDubPlayer(
             Icon(
                 Icons.Rounded.Forward10,
                 contentDescription = "Forward 10 seconds",
-                modifier = Modifier.clickable {
+                modifier = Modifier.clickable(enabled = videoReady) {
                     val duration = processed.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                     val target = (currentMs + 10_000).coerceAtMost(duration)
                     videoView?.seekTo(target)
@@ -1322,6 +1326,7 @@ private fun SingleClockDubPlayer(
                 videoView?.seekTo(target)
             },
             valueRange = 0f..durationMs.toFloat(),
+            enabled = videoReady,
         )
         Row {
             Text(MediaFormatting.duration(currentMs.toLong()), color = LpSecondaryText, fontSize = 10.sp)
@@ -1554,7 +1559,12 @@ private fun PlusScreen(language: UiLanguage, store: AndroidPlusStore, onBack: ()
                 }
             }
         }
-        if (store.products.isEmpty() && !store.isPlus) {
+        if (
+            store.products.isEmpty() &&
+            !store.isPlus &&
+            store.phase != AndroidPlusPhase.CONNECTING &&
+            store.phase != AndroidPlusPhase.LOADING_PRODUCTS
+        ) {
             LpCard {
                 Text(language.text("Products unavailable", "Chưa có sản phẩm"), fontWeight = FontWeight.Bold)
                 Text(
