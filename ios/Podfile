@@ -5,4 +5,8 @@ project 'LingoPlay.xcodeproj'
 
 target 'LingoPlay' do
   pod 'GoogleMLKit/Translate', '8.0.0'
+
+  target 'LingoPlayTests' do
+    inherit! :search_paths
+  end
 end
