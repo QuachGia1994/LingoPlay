@@ -9,6 +9,7 @@ All notable changes to LingoPlay are documented here.
 - Store-readiness documentation records the exact external blockers while Apple Developer/App Store Connect and Play Console accounts are unavailable, including future Worker secret names, products, signing, notifications, sandbox/license-tester and refund/revocation evidence.
 
 ### Fixed
+- iOS Stage 21 DEBUG builds now expose immutable Plus product identifiers as nonisolated constants, fixing Swift 6 actor-isolation compilation in the local StoreKit entitlement path without weakening server authority in Release.
 - Stage 20.1 Clean Background runtime integrity: Spleeter now processes bounded core windows with guard context and absolute-frame core cropping instead of hard-stitching independent 12-second outputs; Android also cleans a completed native separation result if coroutine cancellation lands before coordinator ownership transfers.
 - Clean Background preserves the original source-audio timeline origin when inserting separated accompaniment. Android reads the generated PCM16 accompaniment WAV directly instead of depending on an OEM `audio/raw` MediaCodec decoder.
 - The currently served official Spleeter archive envelope changed while retaining the same official two ONNX payloads. Both clients pin the current archive digest and exact inner model sizes/SHA-256 values; Android also accepts the prior known archive digest only when the extracted models match those exact inner pins.

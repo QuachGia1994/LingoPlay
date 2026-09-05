@@ -5,9 +5,9 @@ import StoreKit
 @MainActor
 @Observable
 final class PlusStore {
-    static let weeklyID = "com.lingoplay.plus.weekly"
-    static let monthlyID = "com.lingoplay.plus.monthly"
-    static let productIDs = [weeklyID, monthlyID]
+    nonisolated static let weeklyID = "com.lingoplay.plus.weekly"
+    nonisolated static let monthlyID = "com.lingoplay.plus.monthly"
+    nonisolated static let productIDs = [weeklyID, monthlyID]
 
     enum PurchaseState: Equatable {
         case idle
