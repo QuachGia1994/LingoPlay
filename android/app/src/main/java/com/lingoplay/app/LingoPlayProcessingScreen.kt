@@ -118,6 +118,9 @@ internal fun ProcessingScreen(
     asrPhase: ASRPhase,
     transcript: ASRTranscript?,
     asrError: String?,
+    speakerPhase: SpeakerPhase,
+    speakerDocument: SpeakerDiarizationDocument?,
+    speakerError: String?,
     translationPhase: TranslationPhase,
     translation: TranslationDocument?,
     translationError: String?,
@@ -132,8 +135,11 @@ internal fun ProcessingScreen(
     mixResult: LocalDubMediaResult?,
     mixError: String?,
     modelInstallState: ModelInstallState,
+    speakerModelInstallState: ModelInstallState,
     onInstallModel: () -> Unit,
     onCancelModel: () -> Unit,
+    onInstallSpeakerModel: () -> Unit,
+    onCancelSpeakerModel: () -> Unit,
     onBack: () -> Unit,
 ) {
     ScreenScroll {
@@ -149,12 +155,14 @@ internal fun ProcessingScreen(
                 ttsPhase == TTSPhase.COMPLETED -> 0.80f
                 ttsPhase == TTSPhase.SYNTHESIZING && ttsSegmentTotal > 0 -> 0.60f + (0.20f * ttsSegment.toFloat() / ttsSegmentTotal.toFloat())
                 translationPhase == TranslationPhase.COMPLETED -> 0.60f
-                translationPhase == TranslationPhase.TRANSLATING && translationBatchTotal > 0 -> 0.40f + (0.20f * translationBatch.toFloat() / translationBatchTotal.toFloat())
+                translationPhase == TranslationPhase.TRANSLATING && translationBatchTotal > 0 -> 0.48f + (0.12f * translationBatch.toFloat() / translationBatchTotal.toFloat())
+                speakerPhase == SpeakerPhase.COMPLETED -> 0.48f
+                speakerPhase == SpeakerPhase.ANALYZING -> 0.44f
                 asrPhase == ASRPhase.COMPLETED -> 0.40f
                 mediaState == MediaPreparationState.AUDIO_READY -> 0.20f
                 else -> 0.05f
             }
-            Text(processingTitle(mediaState, asrPhase, translationPhase, ttsPhase, mixPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(processingTitle(mediaState, asrPhase, speakerPhase, translationPhase, ttsPhase, mixPhase), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("${(progress * 100).toInt()}%", color = LpCyan, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             LinearProgressIndicator(
                 progress = { progress },
@@ -168,6 +176,8 @@ internal fun ProcessingScreen(
             ProcessingRow("Preparing audio", audioProcessState(mediaState))
             CardDivider()
             ProcessingRow("Understanding speech", speechProcessState(asrPhase))
+            CardDivider()
+            ProcessingRow("Finding speakers", speakerProcessState(speakerPhase))
             CardDivider()
             ProcessingRow("Translating", translationProcessState(translationPhase))
             CardDivider()
@@ -185,6 +195,21 @@ internal fun ProcessingScreen(
                 }
                 Text(transcript.text, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
                 Text("${transcript.segments.size} timestamped audio-range segment · local only", color = LpSecondaryText, fontSize = 10.sp)
+            }
+        }
+
+        if (speakerDocument != null && speakerPhase == SpeakerPhase.COMPLETED) {
+            LpCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Speakers detected", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("${speakerDocument.speakerIds.size} voices", color = LpCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "${speakerDocument.turns.size} local speaker turns · overlap is left unassigned instead of guessed",
+                    color = LpSecondaryText,
+                    fontSize = 10.sp,
+                )
             }
         }
 
@@ -242,6 +267,39 @@ internal fun ProcessingScreen(
             }
         }
 
+        if (speakerPhase == SpeakerPhase.MODEL_MISSING) {
+            LpCard {
+                Text("Speaker AI model required", fontWeight = FontWeight.Bold)
+                Text(
+                    "Multi-speaker mode needs the optional local Pyannote INT8 + Titanet pack. No audio leaves this device.",
+                    color = LpSecondaryText,
+                    fontSize = 12.sp,
+                )
+                when (speakerModelInstallState) {
+                    is ModelInstallState.Downloading -> {
+                        LinearProgressIndicator(
+                            progress = { speakerModelInstallState.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = LpCyan,
+                            trackColor = LpSurfaceStrong,
+                        )
+                        Text(
+                            "${(speakerModelInstallState.progress * 100).toInt()}% · ${MediaFormatting.bytes(speakerModelInstallState.bytesDone)} / ${MediaFormatting.bytes(speakerModelInstallState.bytesTotal)}",
+                            color = LpSecondaryText,
+                            fontSize = 11.sp,
+                        )
+                        TextButton(onClick = onCancelSpeakerModel) { Text("Cancel Speaker AI download") }
+                    }
+                    is ModelInstallState.Installed -> Text("Speaker AI installed. Processing is resuming…", color = LpCyan, fontSize = 12.sp)
+                    is ModelInstallState.Failed -> {
+                        Text(speakerModelInstallState.message, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        PrimaryAction("Retry Speaker AI download", Icons.Rounded.Download, onInstallSpeakerModel)
+                    }
+                    ModelInstallState.NotInstalled -> PrimaryAction("Install Speaker AI · ~45 MiB", Icons.Rounded.Download, onInstallSpeakerModel)
+                }
+            }
+        }
+
         if (translationPhase == TranslationPhase.ENDPOINT_MISSING) {
             LpCard {
                 Text("Translation backend is not configured. The recognized transcript remains local and no network request was made.", color = LpSecondaryText, fontSize = 12.sp)
@@ -291,6 +349,9 @@ internal fun ProcessingScreen(
         asrError?.let { error ->
             LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
+        speakerError?.let { error ->
+            LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        }
         translationError?.let { error ->
             LpCard { Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
@@ -303,13 +364,17 @@ internal fun ProcessingScreen(
     }
 }
 
-private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, translationPhase: TranslationPhase, ttsPhase: TTSPhase, mixPhase: MixPhase): String = when (mediaState) {
+private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhase, speakerPhase: SpeakerPhase, translationPhase: TranslationPhase, ttsPhase: TTSPhase, mixPhase: MixPhase): String = when (mediaState) {
     MediaPreparationState.EXTRACTING_AUDIO -> "Preparing local audio"
     MediaPreparationState.AUDIO_READY -> when (asrPhase) {
         ASRPhase.MODEL_MISSING -> "Audio ready · speech model not installed"
         ASRPhase.LOADING_MODEL -> "Loading local speech model"
         ASRPhase.TRANSCRIBING -> "Understanding speech on-device"
-        ASRPhase.COMPLETED -> when (translationPhase) {
+        ASRPhase.COMPLETED -> when (speakerPhase) {
+            SpeakerPhase.MODEL_MISSING -> "Speech ready · Speaker AI not installed"
+            SpeakerPhase.ANALYZING -> "Finding speakers on-device"
+            SpeakerPhase.FAILED -> "Speaker analysis stopped"
+            else -> when (translationPhase) {
             TranslationPhase.TRANSLATING -> "Translating transcript"
             TranslationPhase.COMPLETED -> when (ttsPhase) {
                 TTSPhase.SYNTHESIZING -> "Creating offline voice on-device"
@@ -327,6 +392,7 @@ private fun processingTitle(mediaState: MediaPreparationState, asrPhase: ASRPhas
             TranslationPhase.ENDPOINT_MISSING -> "Speech ready · translation not configured"
             TranslationPhase.FAILED -> "Translation stopped"
             else -> "Speech recognized locally"
+            }
         }
         ASRPhase.FAILED -> "Speech recognition stopped"
         ASRPhase.IDLE -> "Audio ready"
@@ -348,6 +414,14 @@ private fun speechProcessState(state: ASRPhase): ProcessState = when (state) {
     ASRPhase.COMPLETED -> ProcessState.COMPLETE
     ASRPhase.FAILED -> ProcessState.FAILED
     ASRPhase.IDLE -> ProcessState.PENDING
+}
+
+private fun speakerProcessState(state: SpeakerPhase): ProcessState = when (state) {
+    SpeakerPhase.MODEL_MISSING -> ProcessState.BLOCKED
+    SpeakerPhase.ANALYZING -> ProcessState.ACTIVE
+    SpeakerPhase.COMPLETED -> ProcessState.COMPLETE
+    SpeakerPhase.FAILED -> ProcessState.FAILED
+    SpeakerPhase.IDLE -> ProcessState.PENDING
 }
 
 private fun translationProcessState(state: TranslationPhase): ProcessState = when (state) {
@@ -392,7 +466,7 @@ private fun ProcessingRow(title: String, state: ProcessState) {
                 ProcessState.COMPLETE -> "Completed"
                 ProcessState.ACTIVE -> "In progress"
                 ProcessState.PENDING -> "Pending"
-                ProcessState.BLOCKED -> "ASR not installed"
+                ProcessState.BLOCKED -> "Model not installed"
                 ProcessState.CONFIGURATION_MISSING -> "Not configured"
                 ProcessState.VOICE_MISSING -> "Voice not installed"
                 ProcessState.FAILED -> "Failed"

@@ -116,6 +116,23 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(LPTheme.border)
+                    Button(action: model.cycleSpeakerMode) {
+                        SettingsValueRow(icon: "person.2.wave.2.fill", title: model.uiText("Speaker mode", "Chế độ người nói"), value: model.speakerMode.label)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(LPTheme.border)
+                    Toggle(isOn: $model.voiceCloningEnabled) {
+                        Label(model.uiText("Allow local voice cloning", "Cho phép clone giọng cục bộ"), systemImage: "lock.shield.fill")
+                    }
+                    .padding(.vertical, 14)
+                    Text(model.uiText(
+                        "Use only voices you own or have permission to reproduce. Cloning stays local, is off by default, and never assigns a cloned identity to overlapping/unknown speech.",
+                        "Chỉ dùng giọng bạn sở hữu hoặc được phép tái tạo. Clone chạy cục bộ, mặc định tắt và không gán danh tính clone cho đoạn chồng giọng/không xác định."
+                    ))
+                        .font(.caption2)
+                        .foregroundStyle(LPTheme.secondaryText)
+                        .padding(.bottom, 10)
+                    Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.wifiOnly) {
                         Label(model.uiText("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), systemImage: "wifi")
                     }
@@ -141,6 +158,10 @@ struct SettingsView: View {
                 OfflineTranslationModelManagementCard(model: model)
 
                 SpeechModelManagementCard(model: model)
+
+                SpeakerModelManagementCard(model: model)
+
+                VoiceCloningModelManagementCard(model: model)
 
                 NeuralVoiceManagementCard(model: model)
 
@@ -496,8 +517,8 @@ struct NeuralVoiceManagementCard: View {
             switch model.neuralVoiceInstallState {
             case .notInstalled:
                 Text(model.uiText(
-                    "Optional 64 MiB download (~78 MiB installed). It runs fully on-device after an explicit install. One Vietnamese 22.05 kHz preset is included; emotion and voice cloning are not enabled.",
-                    "Gói tải tùy chọn 64 MiB (khoảng 78 MiB sau khi cài). Sau khi bạn chủ động cài, giọng chạy hoàn toàn trên thiết bị. Hiện có một giọng tiếng Việt 22,05 kHz; chưa bật cảm xúc và nhân bản giọng."
+                    "Optional 64 MiB download (~78 MiB installed). It runs fully on-device after an explicit install. One Vietnamese 22.05 kHz preset is included; voice cloning, when available, uses a separate optional model and is not this preset.",
+                    "Gói tải tùy chọn 64 MiB (khoảng 78 MiB sau khi cài). Sau khi bạn chủ động cài, giọng chạy hoàn toàn trên thiết bị. Đây là một preset tiếng Việt 22,05 kHz; clone giọng, khi khả dụng, dùng model tùy chọn riêng chứ không phải preset này."
                 ))
                     .font(.caption)
                     .foregroundStyle(LPTheme.secondaryText)

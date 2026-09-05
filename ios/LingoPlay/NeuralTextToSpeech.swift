@@ -146,8 +146,128 @@ final class OfflineDubbingTTSService {
     private let system = SystemVietnameseTTSService()
     private let neural = NeuralVietnameseTTSService()
     private let neuralStore = NeuralVoiceModelStore()
+    private let cloning = VoiceCloningTTSService()
+    private let cloningStore = VoiceCloningModelStore()
 
     func synthesize(
+        document: TranslationDocument,
+        preferredVoiceIdentifier: String?,
+        speakerVoiceMap: [String: String] = [:],
+        cloneReferences: [String: VoiceCloneReference] = [:],
+        progress: @MainActor @Sendable (Int, Int) -> Void
+    ) async throws -> DubSpeechDocument {
+        guard !cloneReferences.isEmpty else {
+            return try await synthesizeRegular(
+                document: document,
+                preferredVoiceIdentifier: preferredVoiceIdentifier,
+                speakerVoiceMap: speakerVoiceMap,
+                progress: progress
+            )
+        }
+
+        let cloneable = document.segments.filter { segment in
+            segment.overlappingSpeakerIDs.isEmpty &&
+                segment.speakerID.flatMap { cloneReferences[$0] } != nil
+        }
+        let cloneableIDs = Set(cloneable.map(\.id))
+        let fallback = document.segments.filter { !cloneableIDs.contains($0.id) }
+        var output: [DubSpeechSegment] = []
+        var completed = 0
+
+        if !cloneable.isEmpty {
+            guard let model = cloningStore.model() else {
+                throw TTSError.synthesisFailed("Voice Cloning model is not installed.")
+            }
+            let cloned = try await cloning.synthesize(
+                document: TranslationDocument(
+                    sourceLanguage: document.sourceLanguage,
+                    targetLanguage: document.targetLanguage,
+                    segments: cloneable,
+                    mode: document.mode,
+                    speakerVoiceMap: document.speakerVoiceMap
+                ),
+                model: model,
+                references: cloneReferences
+            ) { local, _ in
+                progress(completed + local, document.segments.count)
+            }
+            output.append(contentsOf: cloned.segments)
+            completed += cloneable.count
+        }
+
+        if !fallback.isEmpty {
+            let normal = try await synthesizeRegular(
+                document: TranslationDocument(
+                    sourceLanguage: document.sourceLanguage,
+                    targetLanguage: document.targetLanguage,
+                    segments: fallback,
+                    mode: document.mode,
+                    speakerVoiceMap: document.speakerVoiceMap
+                ),
+                preferredVoiceIdentifier: preferredVoiceIdentifier,
+                speakerVoiceMap: speakerVoiceMap
+            ) { local, _ in
+                progress(completed + local, document.segments.count)
+            }
+            output.append(contentsOf: normal.segments)
+        }
+
+        let order = Dictionary(uniqueKeysWithValues: document.segments.enumerated().map { ($1.id, $0) })
+        output.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        return DubSpeechDocument(voiceIdentifier: "hybrid:clone-local", segments: output)
+    }
+
+    private func synthesizeRegular(
+        document: TranslationDocument,
+        preferredVoiceIdentifier: String?,
+        speakerVoiceMap: [String: String],
+        progress: @MainActor @Sendable (Int, Int) -> Void
+    ) async throws -> DubSpeechDocument {
+        if speakerVoiceMap.isEmpty {
+            return try await synthesizeWithVoice(
+                document: document,
+                preferredVoiceIdentifier: preferredVoiceIdentifier,
+                progress: progress
+            )
+        }
+
+        var grouped: [(voiceID: String?, segments: [TranslationSegment])] = []
+        for segment in document.segments {
+            let voiceID = segment.speakerID.flatMap { speakerVoiceMap[$0] } ?? preferredVoiceIdentifier
+            if let index = grouped.firstIndex(where: { $0.voiceID == voiceID }) {
+                grouped[index].segments.append(segment)
+            } else {
+                grouped.append((voiceID, [segment]))
+            }
+        }
+
+        var output: [DubSpeechSegment] = []
+        var completed = 0
+        for group in grouped {
+            let partial = try await synthesizeWithVoice(
+                document: TranslationDocument(
+                    sourceLanguage: document.sourceLanguage,
+                    targetLanguage: document.targetLanguage,
+                    segments: group.segments,
+                    mode: document.mode,
+                    speakerVoiceMap: document.speakerVoiceMap
+                ),
+                preferredVoiceIdentifier: group.voiceID
+            ) { local, _ in
+                progress(completed + local, document.segments.count)
+            }
+            output.append(contentsOf: partial.segments)
+            completed += group.segments.count
+        }
+        let order = Dictionary(uniqueKeysWithValues: document.segments.enumerated().map { ($1.id, $0) })
+        output.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        return DubSpeechDocument(
+            voiceIdentifier: "multi-speaker:\(grouped.count)",
+            segments: output
+        )
+    }
+
+    private func synthesizeWithVoice(
         document: TranslationDocument,
         preferredVoiceIdentifier: String?,
         progress: @MainActor @Sendable (Int, Int) -> Void

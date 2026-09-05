@@ -14,6 +14,8 @@ data class TranslationSourceSegment(
     val startMs: Int,
     val endMs: Int,
     val text: String,
+    val speakerId: String? = null,
+    val overlappingSpeakerIds: List<String> = emptyList(),
 )
 
 data class TranslationSegment(
@@ -22,6 +24,8 @@ data class TranslationSegment(
     val endMs: Int,
     val sourceText: String,
     val translatedText: String,
+    val speakerId: String? = null,
+    val overlappingSpeakerIds: List<String> = emptyList(),
 )
 
 data class TranslationDocument(
@@ -29,6 +33,7 @@ data class TranslationDocument(
     val targetLanguage: String,
     val segments: List<TranslationSegment>,
     val mode: TranslationMode = TranslationMode.CLOUD,
+    val speakerVoiceMap: Map<String, String> = emptyMap(),
 ) {
     val translatedText: String get() = segments.joinToString(" ") { it.translatedText }
 }
@@ -83,6 +88,8 @@ object TranslationBatching {
                 startMs = startMs,
                 endMs = endMs,
                 text = text,
+                speakerId = segment.speakerId,
+                overlappingSpeakerIds = segment.overlappingSpeakerIds,
             )
         }
         if (timed.isNotEmpty()) return timed
@@ -136,7 +143,15 @@ object TranslationService {
         val targetBaseLanguage = targetLanguage.trim().lowercase().substringBefore('-')
         if (sourceLanguage == targetBaseLanguage) {
             val copied = sourceSegments.map { source ->
-                TranslationSegment(source.id, source.startMs, source.endMs, source.text, source.text)
+                TranslationSegment(
+                    source.id,
+                    source.startMs,
+                    source.endMs,
+                    source.text,
+                    source.text,
+                    source.speakerId,
+                    source.overlappingSpeakerIds,
+                )
             }
             onProgress(copied.size, copied.size)
             return@withContext TranslationDocument(
@@ -157,7 +172,15 @@ object TranslationService {
         val translatedSegments = sourceSegments.map { source ->
             val text = TranslationTextPolicy.speechText(translatedById[source.id].orEmpty())
             check(text.isNotEmpty()) { "Translation backend returned an incomplete response." }
-            TranslationSegment(source.id, source.startMs, source.endMs, source.text, text)
+            TranslationSegment(
+                source.id,
+                source.startMs,
+                source.endMs,
+                source.text,
+                text,
+                source.speakerId,
+                source.overlappingSpeakerIds,
+            )
         }
         TranslationDocument(sourceLanguage, targetLanguage, translatedSegments, TranslationMode.CLOUD)
     }

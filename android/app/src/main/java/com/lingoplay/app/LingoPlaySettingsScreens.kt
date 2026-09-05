@@ -119,12 +119,18 @@ internal fun SettingsScreen(
     subtitleMode: SubtitleMode,
     targetLanguage: TargetLanguageChoice,
     translationMode: TranslationMode,
+    speakerMode: SpeakerMode,
+    voiceCloningEnabled: Boolean,
     voiceLabel: String,
     isPlus: Boolean,
     modelInstallState: ModelInstallState,
     canDeleteModel: Boolean,
     neuralVoiceInstallState: ModelInstallState,
     canDeleteNeuralVoice: Boolean,
+    speakerModelInstallState: ModelInstallState,
+    canDeleteSpeakerModel: Boolean,
+    cloningModelInstallState: ModelInstallState,
+    canDeleteCloningModel: Boolean,
     downloadedTranslationModelCodes: Set<String>,
     translationModelBusyCode: String?,
     translationModelError: String?,
@@ -135,6 +141,12 @@ internal fun SettingsScreen(
     onInstallNeuralVoice: () -> Unit,
     onCancelNeuralVoice: () -> Unit,
     onDeleteNeuralVoice: () -> Unit,
+    onInstallSpeakerModel: () -> Unit,
+    onCancelSpeakerModel: () -> Unit,
+    onDeleteSpeakerModel: () -> Unit,
+    onInstallCloningModel: () -> Unit,
+    onCancelCloningModel: () -> Unit,
+    onDeleteCloningModel: () -> Unit,
     onToggleTranslationModel: (String) -> Unit,
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -142,6 +154,8 @@ internal fun SettingsScreen(
     onSubtitleMode: () -> Unit,
     onTargetLanguage: () -> Unit,
     onTranslationMode: () -> Unit,
+    onSpeakerMode: () -> Unit,
+    onVoiceCloningEnabled: (Boolean) -> Unit,
     onVoice: () -> Unit,
     onPlus: () -> Unit,
     onAbout: () -> Unit,
@@ -175,6 +189,23 @@ internal fun SettingsScreen(
             SettingsValueRow(Icons.Rounded.Language, language.text("Dubbing Language", "Ngôn ngữ lồng tiếng"), targetLanguage.label, onTargetLanguage)
             CardDivider()
             SettingsValueRow(Icons.Rounded.Translate, language.text("Translation mode", "Chế độ dịch"), translationMode.label, onTranslationMode)
+            CardDivider()
+            SettingsValueRow(Icons.Rounded.Person, language.text("Speaker mode", "Chế độ người nói"), speakerMode.label, onSpeakerMode)
+            CardDivider()
+            ToggleRow(
+                Icons.Rounded.Shield,
+                language.text("Allow local voice cloning", "Cho phép clone giọng cục bộ"),
+                voiceCloningEnabled,
+                onVoiceCloningEnabled,
+            )
+            Text(
+                language.text(
+                    "Consent gate only. Cloning is local, requires a verified model and matching reference speech; never use it to impersonate someone without permission.",
+                    "Chỉ là cổng đồng ý. Clone chạy cục bộ, cần model đã xác minh và mẫu giọng khớp; không dùng để giả mạo người khác khi chưa được phép.",
+                ),
+                color = LpSecondaryText,
+                fontSize = 10.sp,
+            )
             CardDivider()
             ToggleRow(Icons.Rounded.Wifi, language.text("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), wifiOnly, onWifiOnlyChange)
             CardDivider()
@@ -280,6 +311,20 @@ internal fun SettingsScreen(
             }
         }
 
+        Stage19ModelSettingsCards(
+            language = language,
+            speakerModelInstallState = speakerModelInstallState,
+            canDeleteSpeakerModel = canDeleteSpeakerModel,
+            cloningModelInstallState = cloningModelInstallState,
+            canDeleteCloningModel = canDeleteCloningModel,
+            onInstallSpeakerModel = onInstallSpeakerModel,
+            onCancelSpeakerModel = onCancelSpeakerModel,
+            onDeleteSpeakerModel = onDeleteSpeakerModel,
+            onInstallCloningModel = onInstallCloningModel,
+            onCancelCloningModel = onCancelCloningModel,
+            onDeleteCloningModel = onDeleteCloningModel,
+        )
+
         LpCard {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = LpViolet, modifier = Modifier.size(21.dp))
@@ -315,8 +360,8 @@ internal fun SettingsScreen(
                 is ModelInstallState.Installed -> {
                     Text(
                         language.text(
-                            "One local 22.05 kHz neural preset. Select it in AI Voice; system voices remain the fallback. Emotion and cloning are unavailable.",
-                            "Một preset neural 22,05 kHz chạy cục bộ. Chọn trong Giọng AI; giọng hệ thống vẫn là fallback. Chưa hỗ trợ cảm xúc và clone giọng.",
+                            "One local 22.05 kHz neural preset. Select it in AI Voice; system voices remain the fallback. Emotion is unavailable; Voice Cloning uses the separate optional EN/ZH model above.",
+                            "Một preset neural 22,05 kHz chạy cục bộ. Chọn trong Giọng AI; giọng hệ thống vẫn là fallback. Chưa hỗ trợ cảm xúc; Voice Cloning dùng model EN/ZH tùy chọn riêng ở trên.",
                         ),
                         color = LpSecondaryText,
                         fontSize = 11.sp,

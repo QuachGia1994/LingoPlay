@@ -6,6 +6,24 @@ struct ASRSegment: Identifiable, Sendable, Equatable {
     let start: TimeInterval
     let end: TimeInterval
     let text: String
+    let speakerID: String?
+    let overlappingSpeakerIDs: [String]
+
+    init(
+        id: Int,
+        start: TimeInterval,
+        end: TimeInterval,
+        text: String,
+        speakerID: String? = nil,
+        overlappingSpeakerIDs: [String] = []
+    ) {
+        self.id = id
+        self.start = start
+        self.end = end
+        self.text = text
+        self.speakerID = speakerID
+        self.overlappingSpeakerIDs = overlappingSpeakerIDs
+    }
 }
 
 struct ASRTranscript: Sendable, Equatable {
@@ -118,7 +136,14 @@ enum ASRFormatting {
             guard !text.isEmpty else { return nil }
             let start = max(0, segment.start)
             let end = max(start, segment.end)
-            return ASRSegment(id: segment.id, start: start, end: end, text: text)
+            return ASRSegment(
+                id: segment.id,
+                start: start,
+                end: end,
+                text: text,
+                speakerID: segment.speakerID,
+                overlappingSpeakerIDs: segment.overlappingSpeakerIDs
+            )
         }
     }
 }

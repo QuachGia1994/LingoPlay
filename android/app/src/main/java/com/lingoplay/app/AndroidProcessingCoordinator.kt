@@ -7,6 +7,7 @@ import java.io.File
 internal enum class ProcessingFailureStep {
     AUDIO,
     ASR,
+    DIARIZATION,
     TRANSLATION,
     TTS,
     MIX,
@@ -18,6 +19,8 @@ internal sealed interface ProcessingEvent {
     data object AsrLoadingModel : ProcessingEvent
     data object AsrTranscribing : ProcessingEvent
     data class TranscriptReady(val transcript: ASRTranscript) : ProcessingEvent
+    data object DiarizationStarted : ProcessingEvent
+    data class DiarizationReady(val document: SpeakerDiarizationDocument) : ProcessingEvent
     data object TranslationStarted : ProcessingEvent
     data class TranslationProgress(val batch: Int, val total: Int) : ProcessingEvent
     data class TranslationReady(val document: TranslationDocument) : ProcessingEvent
@@ -36,6 +39,8 @@ internal sealed interface ProcessingOutcome {
     ) : ProcessingOutcome
 
     data object ModelMissing : ProcessingOutcome
+    data object SpeakerModelMissing : ProcessingOutcome
+    data object CloningModelMissing : ProcessingOutcome
     data object TranslationEndpointMissing : ProcessingOutcome
     data object VoiceMissing : ProcessingOutcome
     data class Failed(val step: ProcessingFailureStep, val message: String) : ProcessingOutcome
@@ -44,7 +49,17 @@ internal sealed interface ProcessingOutcome {
 internal interface AndroidProcessingRuntime {
     suspend fun extractAudio(media: LocalMediaItem): File
     fun findWhisperModel(): SherpaWhisperModel?
-    suspend fun transcribe(audioFile: File, model: SherpaWhisperModel, sourceLanguageCode: String?): ASRTranscript
+    suspend fun transcribe(
+        audioFile: File,
+        model: SherpaWhisperModel,
+        sourceLanguageCode: String?,
+        speakerMode: SpeakerMode,
+    ): ASRTranscript
+    fun findSpeakerModel(): SpeakerDiarizationModel?
+    suspend fun diarize(audioFile: File, model: SpeakerDiarizationModel): SpeakerDiarizationDocument
+    suspend fun availableVoices(): List<OfflineVoiceOption>
+    fun voiceCloningModelInstalled(): Boolean
+    suspend fun buildVoiceCloneReferences(audioFile: File, transcript: ASRTranscript): Map<String, VoiceCloneReference>
     suspend fun translate(
         transcript: ASRTranscript,
         targetLanguage: String,
@@ -55,6 +70,8 @@ internal interface AndroidProcessingRuntime {
     suspend fun synthesize(
         document: TranslationDocument,
         preferredVoiceId: String?,
+        speakerVoiceMap: Map<String, String>,
+        cloneReferences: Map<String, VoiceCloneReference>,
         onProgress: suspend (Int, Int) -> Unit,
     ): DubSpeechDocument
 
@@ -87,12 +104,33 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
         audioFile: File,
         model: SherpaWhisperModel,
         sourceLanguageCode: String?,
-    ): ASRTranscript = SherpaWhisperSpeechRecognizer.transcribe(
-        context = context,
-        audioFile = audioFile,
-        model = model,
-        sourceLanguageCode = sourceLanguageCode,
-    )
+        speakerMode: SpeakerMode,
+    ): ASRTranscript {
+        val defaultChunkSeconds = InferenceMemoryPolicy.forDevice(context).chunkSeconds
+        return SherpaWhisperSpeechRecognizer.transcribe(
+            context = context,
+            audioFile = audioFile,
+            model = model,
+            sourceLanguageCode = sourceLanguageCode,
+            chunkSecondsOverride = SpeakerAwareASRPolicy.chunkSeconds(defaultChunkSeconds, speakerMode),
+        )
+    }
+
+    override fun findSpeakerModel(): SpeakerDiarizationModel? = SpeakerDiarizationModelStore.find(context)
+
+    override suspend fun diarize(
+        audioFile: File,
+        model: SpeakerDiarizationModel,
+    ): SpeakerDiarizationDocument = SpeakerDiarizationService.diarize(context, audioFile, model)
+
+    override suspend fun availableVoices(): List<OfflineVoiceOption> = OfflineDubbingTTSService.availableVoices(context)
+
+    override fun voiceCloningModelInstalled(): Boolean = VoiceCloningModelStore.find(context) != null
+
+    override suspend fun buildVoiceCloneReferences(
+        audioFile: File,
+        transcript: ASRTranscript,
+    ): Map<String, VoiceCloneReference> = VoiceCloneReferenceBuilder.build(audioFile, transcript)
 
     override suspend fun translate(
         transcript: ASRTranscript,
@@ -109,11 +147,15 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
     override suspend fun synthesize(
         document: TranslationDocument,
         preferredVoiceId: String?,
+        speakerVoiceMap: Map<String, String>,
+        cloneReferences: Map<String, VoiceCloneReference>,
         onProgress: suspend (Int, Int) -> Unit,
-    ): DubSpeechDocument = OfflineDubbingTTSService.synthesize(
+    ): DubSpeechDocument = HybridDubbingTTSService.synthesize(
         context = context,
         document = document,
         preferredVoiceId = preferredVoiceId,
+        speakerVoiceMap = speakerVoiceMap,
+        cloneReferences = cloneReferences,
         onProgress = onProgress,
     )
 
@@ -173,13 +215,36 @@ internal class AndroidProcessingCoordinator(
         val transcript = transcribe(audioFile, model, config, onEvent)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.ASR, "Speech recognition failed.")
 
-        if (config.translationMode == TranslationMode.CLOUD && !translationConfigured) {
+        val speakerResolution = resolveSpeakers(media, audioFile, transcript, config, onEvent)
+            ?: return ProcessingOutcome.SpeakerModelMissing
+        val annotatedTranscript = speakerResolution.transcript
+        val resolvedConfig = speakerResolution.config
+        val cloneReferences = if (
+            resolvedConfig.speakerMode == SpeakerMode.MULTI &&
+            resolvedConfig.voiceCloningEnabled &&
+            VoiceCloningPolicy.supportsTarget(resolvedConfig.targetLanguage.code)
+        ) {
+            if (!runtime.voiceCloningModelInstalled()) return ProcessingOutcome.CloningModelMissing
+            runtime.buildVoiceCloneReferences(audioFile, annotatedTranscript).also { references ->
+                if (references.isEmpty()) {
+                    return ProcessingOutcome.Failed(
+                        ProcessingFailureStep.TTS,
+                        "Voice Cloning needs at least one clear 1.5–15 second single-speaker reference segment.",
+                    )
+                }
+            }
+        } else {
+            emptyMap()
+        }
+
+        if (resolvedConfig.translationMode == TranslationMode.CLOUD && !translationConfigured) {
             return ProcessingOutcome.TranslationEndpointMissing
         }
-        val translation = translate(transcript, config, onEvent)
+        val translation = translate(annotatedTranscript, resolvedConfig, onEvent)
+            ?.copy(speakerVoiceMap = resolvedConfig.speakerVoiceMap)
             ?: return ProcessingOutcome.Failed(ProcessingFailureStep.TRANSLATION, "Translation failed.")
 
-        val dubOutcome = synthesize(translation, config, onEvent)
+        val dubOutcome = synthesize(translation, resolvedConfig, cloneReferences, onEvent)
         if (dubOutcome.voiceMissing) return ProcessingOutcome.VoiceMissing
         val dub = dubOutcome.document
             ?: return ProcessingOutcome.Failed(
@@ -187,7 +252,7 @@ internal class AndroidProcessingCoordinator(
                 dubOutcome.errorMessage ?: "Offline speech synthesis failed.",
             )
 
-        renderAndSave(media, translation, dub, config, onEvent)
+        renderAndSave(media, translation, dub, resolvedConfig, onEvent)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (failure: ProcessingStepException) {
@@ -237,7 +302,7 @@ internal class AndroidProcessingCoordinator(
     ): ASRTranscript? = try {
         onEvent(ProcessingEvent.AsrLoadingModel)
         onEvent(ProcessingEvent.AsrTranscribing)
-        runtime.transcribe(audioFile, model, config.sourceLanguage.code).also { transcript ->
+        runtime.transcribe(audioFile, model, config.sourceLanguage.code, config.speakerMode).also { transcript ->
             onEvent(ProcessingEvent.TranscriptReady(transcript))
         }
     } catch (cancelled: CancellationException) {
@@ -245,6 +310,47 @@ internal class AndroidProcessingCoordinator(
     } catch (error: Throwable) {
         runtime.record("asr_failed")
         throw ProcessingStepException(ProcessingFailureStep.ASR, error.message ?: "Speech recognition failed.", error)
+    }
+
+    private data class SpeakerResolution(
+        val transcript: ASRTranscript,
+        val config: ProcessingConfig,
+    )
+
+    private suspend fun resolveSpeakers(
+        media: LocalMediaItem,
+        audioFile: File,
+        transcript: ASRTranscript,
+        config: ProcessingConfig,
+        onEvent: suspend (ProcessingEvent) -> Unit,
+    ): SpeakerResolution? {
+        if (config.speakerMode == SpeakerMode.SINGLE) return SpeakerResolution(transcript, config.copy(speakerVoiceMap = emptyMap()))
+        val model = runtime.findSpeakerModel() ?: return null
+        return try {
+            onEvent(ProcessingEvent.DiarizationStarted)
+            val diarization = runtime.diarize(audioFile, model)
+            onEvent(ProcessingEvent.DiarizationReady(diarization))
+            val annotated = SpeakerDiarizationPolicy.annotate(transcript, diarization)
+            val mapping = SpeakerVoicePolicy.resolve(
+                speakerIds = diarization.speakerIds,
+                availableVoices = runtime.availableVoices(),
+                targetLanguage = config.targetLanguage.code,
+                preferredVoiceId = config.preferredVoiceId,
+                existing = config.speakerVoiceMap,
+            )
+            val resolved = config.copy(speakerVoiceMap = mapping)
+            runtime.saveCheckpoint(media, audioFile, resolved)
+            SpeakerResolution(annotated, resolved)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            runtime.record("speaker_diarization_failed")
+            throw ProcessingStepException(
+                ProcessingFailureStep.DIARIZATION,
+                error.message ?: "Speaker diarization failed.",
+                error,
+            )
+        }
     }
 
     private suspend fun translate(
@@ -280,10 +386,16 @@ internal class AndroidProcessingCoordinator(
     private suspend fun synthesize(
         translation: TranslationDocument,
         config: ProcessingConfig,
+        cloneReferences: Map<String, VoiceCloneReference>,
         onEvent: suspend (ProcessingEvent) -> Unit,
     ): DubOutcome = try {
         onEvent(ProcessingEvent.TtsStarted)
-        val document = runtime.synthesize(translation, config.preferredVoiceId) { segment, total ->
+        val document = runtime.synthesize(
+            translation,
+            config.preferredVoiceId,
+            config.speakerVoiceMap,
+            cloneReferences,
+        ) { segment, total ->
             onEvent(ProcessingEvent.TtsProgress(segment, total))
         }
         onEvent(ProcessingEvent.TtsReady(document))

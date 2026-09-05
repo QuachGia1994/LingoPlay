@@ -123,6 +123,9 @@ struct ProcessingConfig: Sendable, Equatable {
     let dubbingMode: DubbingModePreset
     let subtitleMode: SubtitleMode
     let translationMode: TranslationMode
+    let speakerMode: SpeakerMode
+    let speakerVoiceMap: [String: String]
+    let voiceCloningEnabled: Bool
 
     init(
         sourceLanguage: SourceLanguageChoice,
@@ -130,7 +133,10 @@ struct ProcessingConfig: Sendable, Equatable {
         preferredVoiceIdentifier: String?,
         dubbingMode: DubbingModePreset,
         subtitleMode: SubtitleMode,
-        translationMode: TranslationMode = .cloud
+        translationMode: TranslationMode = .cloud,
+        speakerMode: SpeakerMode = .single,
+        speakerVoiceMap: [String: String] = [:],
+        voiceCloningEnabled: Bool = false
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
@@ -138,6 +144,9 @@ struct ProcessingConfig: Sendable, Equatable {
         self.dubbingMode = dubbingMode
         self.subtitleMode = subtitleMode
         self.translationMode = translationMode
+        self.speakerMode = speakerMode
+        self.speakerVoiceMap = speakerVoiceMap
+        self.voiceCloningEnabled = voiceCloningEnabled
     }
 }
 

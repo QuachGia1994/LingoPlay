@@ -67,8 +67,27 @@ for forbidden in (
     require(forbidden not in android_root, f"Android root delegates processing call: {forbidden}")
 require((ROOT / "android/app/src/main/java/com/lingoplay/app/AndroidProcessingCoordinator.kt").is_file(), "Android processing coordinator exists")
 require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/AndroidProcessingCoordinatorTest.kt").is_file(), "Android coordinator instrumentation test exists")
+android_coordinator_stage19 = (ROOT / "android/app/src/main/java/com/lingoplay/app/AndroidProcessingCoordinator.kt").read_text(encoding="utf-8")
+android_speech_stage19 = (ROOT / "android/app/src/main/java/com/lingoplay/app/SpeechRecognition.kt").read_text(encoding="utf-8")
+require("speakerMode: SpeakerMode" in android_coordinator_stage19 and "config.speakerMode" in android_coordinator_stage19, "Android ASR receives immutable speaker mode")
+require("MULTI_SPEAKER_CHUNK_SECONDS = 6" in android_speech_stage19, "Android multi-speaker ASR keeps short attribution windows")
+require("SpeakerAwareASRPolicy.chunkSeconds" in android_coordinator_stage19, "Android coordinator applies speaker-aware ASR chunk policy")
+require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/SpeakerDiarizationDeviceTest.kt").is_file(), "Android Stage 19 physical diarization/cloning regression exists")
+for relative in (
+    "android/app/src/main/java/com/lingoplay/app/SpeakerDiarization.kt",
+    "android/app/src/main/java/com/lingoplay/app/VoiceCloning.kt",
+    "android/app/src/main/java/com/lingoplay/app/Stage19ModelLifecycleState.kt",
+    "android/app/src/main/java/com/lingoplay/app/LingoPlayStage19Settings.kt",
+    "ios/LingoPlay/SpeakerDiarization.swift",
+    "ios/LingoPlay/VoiceCloning.swift",
+    "ios/LingoPlay/AppModel+Speaker.swift",
+    "ios/LingoPlay/AppModel+TranslationPipeline.swift",
+    "ios/LingoPlay/Stage19ModelSettingsViews.swift",
+):
+    size_under(relative, 32_000)
 
 ios_model = (ROOT / "ios/LingoPlay/AppModel.swift").read_text(encoding="utf-8")
+ios_translation_pipeline = (ROOT / "ios/LingoPlay/AppModel+TranslationPipeline.swift").read_text(encoding="utf-8")
 require(re.search(r"\bstruct\s+\w+View\b", ios_model) is None, "iOS AppModel contains no SwiftUI view structs")
 require("DubbingPreferencePolicy.availableOfflineVoices()" not in ios_model, "iOS preference presentation extracted from AppModel core")
 require("private var processingTask: Task<Void, Never>?" in ios_model, "iOS processing task is explicitly tracked")
@@ -164,8 +183,8 @@ require("pod 'GoogleMLKit/Translate', '8.0.0'" in ios_podfile, "iOS pins officia
 require("cocoapods -v 1.16.2" in ios_workflow and "pod install" in ios_workflow, "iOS CI pins CocoaPods and installs pods")
 require("-workspace ios/LingoPlay.xcworkspace" in ios_workflow, "iOS CI builds the CocoaPods workspace")
 require("-project ios/LingoPlay.xcodeproj" not in ios_workflow, "iOS CI does not bypass CocoaPods integration")
-require("switch run.config.translationMode" in ios_model, "iOS translation route is explicit and bound to the immutable processing run")
-require("config.translationMode == TranslationMode.CLOUD && !translationConfigured" in android_coordinator, "Android cloud endpoint gate is mode-aware")
+require("switch run.config.translationMode" in ios_translation_pipeline, "iOS translation route is explicit and bound to the immutable processing run")
+require("resolvedConfig.translationMode == TranslationMode.CLOUD && !translationConfigured" in android_coordinator, "Android cloud endpoint gate is mode-aware")
 for name, source in (("Android", android_offline_translation), ("iOS", ios_offline_translation)):
     require("will not switch to cloud automatically" in source, f"{name} offline route fails closed")
     require("TranslationAPIBaseURL" not in source and "HttpURLConnection" not in source, f"{name} offline route has no cloud endpoint")

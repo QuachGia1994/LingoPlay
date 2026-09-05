@@ -1,7 +1,7 @@
 import Foundation
 
 enum TTSCachePolicy {
-    private static let cacheFamilies = ["TTS", "NeuralTTS"]
+    private static let cacheFamilies = ["TTS", "NeuralTTS", "CloneTTS"]
 
     static func cleanup(document: DubSpeechDocument) {
         sessionDirectories(document: document).forEach { directory in

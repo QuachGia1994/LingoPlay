@@ -83,6 +83,24 @@ struct TranslationSourceSegment: Identifiable, Sendable, Equatable, Codable {
     let startMs: Int
     let endMs: Int
     let text: String
+    let speakerID: String?
+    let overlappingSpeakerIDs: [String]
+
+    init(
+        id: String,
+        startMs: Int,
+        endMs: Int,
+        text: String,
+        speakerID: String? = nil,
+        overlappingSpeakerIDs: [String] = []
+    ) {
+        self.id = id
+        self.startMs = startMs
+        self.endMs = endMs
+        self.text = text
+        self.speakerID = speakerID
+        self.overlappingSpeakerIDs = overlappingSpeakerIDs
+    }
 }
 
 struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
@@ -91,6 +109,41 @@ struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
     let endMs: Int
     let sourceText: String
     let translatedText: String
+    let speakerID: String?
+    let overlappingSpeakerIDs: [String]
+
+    init(
+        id: String,
+        startMs: Int,
+        endMs: Int,
+        sourceText: String,
+        translatedText: String,
+        speakerID: String? = nil,
+        overlappingSpeakerIDs: [String] = []
+    ) {
+        self.id = id
+        self.startMs = startMs
+        self.endMs = endMs
+        self.sourceText = sourceText
+        self.translatedText = translatedText
+        self.speakerID = speakerID
+        self.overlappingSpeakerIDs = overlappingSpeakerIDs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startMs, endMs, sourceText, translatedText, speakerID, overlappingSpeakerIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        startMs = try values.decode(Int.self, forKey: .startMs)
+        endMs = try values.decode(Int.self, forKey: .endMs)
+        sourceText = try values.decode(String.self, forKey: .sourceText)
+        translatedText = try values.decode(String.self, forKey: .translatedText)
+        speakerID = try values.decodeIfPresent(String.self, forKey: .speakerID)
+        overlappingSpeakerIDs = try values.decodeIfPresent([String].self, forKey: .overlappingSpeakerIDs) ?? []
+    }
 }
 
 struct TranslationDocument: Sendable, Equatable {
@@ -98,17 +151,20 @@ struct TranslationDocument: Sendable, Equatable {
     let targetLanguage: String
     let segments: [TranslationSegment]
     let mode: TranslationMode
+    let speakerVoiceMap: [String: String]
 
     init(
         sourceLanguage: String,
         targetLanguage: String,
         segments: [TranslationSegment],
-        mode: TranslationMode = .cloud
+        mode: TranslationMode = .cloud,
+        speakerVoiceMap: [String: String] = [:]
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
         self.segments = segments
         self.mode = mode
+        self.speakerVoiceMap = speakerVoiceMap
     }
 
     var translatedText: String {
@@ -200,7 +256,9 @@ struct TranslationService: Sendable {
                     startMs: source.startMs,
                     endMs: source.endMs,
                     sourceText: source.text,
-                    translatedText: source.text
+                    translatedText: source.text,
+                    speakerID: source.speakerID,
+                    overlappingSpeakerIDs: source.overlappingSpeakerIDs
                 )
             }
             await progress(copied.count, copied.count)
@@ -237,7 +295,9 @@ struct TranslationService: Sendable {
                 startMs: source.startMs,
                 endMs: source.endMs,
                 sourceText: source.text,
-                translatedText: translatedText
+                translatedText: translatedText,
+                speakerID: source.speakerID,
+                overlappingSpeakerIDs: source.overlappingSpeakerIDs
             )
         }
 
@@ -288,7 +348,9 @@ struct TranslationService: Sendable {
                 id: "s\(index)",
                 startMs: startMs,
                 endMs: endMs,
-                text: text
+                text: text,
+                speakerID: segment.speakerID,
+                overlappingSpeakerIDs: segment.overlappingSpeakerIDs
             )
         }
         if !timed.isEmpty { return timed }

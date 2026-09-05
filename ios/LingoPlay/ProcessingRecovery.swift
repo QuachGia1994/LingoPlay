@@ -27,6 +27,9 @@ actor ProcessingRecoveryStore {
         let dubbingMode: String?
         let subtitleMode: String?
         let translationMode: String?
+        let speakerMode: String?
+        let speakerVoiceMap: [String: String]?
+        let voiceCloningEnabled: Bool?
         let processingRunID: UUID?
         let updatedAtEpochMs: Int64
     }
@@ -83,6 +86,9 @@ actor ProcessingRecoveryStore {
             dubbingMode: config?.dubbingMode.rawValue,
             subtitleMode: config?.subtitleMode.rawValue,
             translationMode: config?.translationMode.rawValue,
+            speakerMode: config?.speakerMode.rawValue,
+            speakerVoiceMap: config?.speakerVoiceMap,
+            voiceCloningEnabled: config?.voiceCloningEnabled,
             processingRunID: processingRunID,
             updatedAtEpochMs: Int64(Date().timeIntervalSince1970 * 1_000)
         )
@@ -121,7 +127,10 @@ actor ProcessingRecoveryStore {
             preferredVoiceIdentifier: record.preferredVoiceIdentifier,
             dubbingMode: mode,
             subtitleMode: record.subtitleMode.flatMap(SubtitleMode.init(rawValue:)) ?? .bilingual,
-            translationMode: record.translationMode.flatMap(TranslationMode.init(rawValue:)) ?? .cloud
+            translationMode: record.translationMode.flatMap(TranslationMode.init(rawValue:)) ?? .cloud,
+            speakerMode: record.speakerMode.flatMap(SpeakerMode.init(rawValue:)) ?? .single,
+            speakerVoiceMap: record.speakerVoiceMap ?? [:],
+            voiceCloningEnabled: record.voiceCloningEnabled ?? false
         )
     }
 

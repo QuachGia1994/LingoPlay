@@ -14,9 +14,20 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
+enum class ModelInstallPhase {
+    DOWNLOADING,
+    VERIFYING,
+    EXTRACTING,
+    ACTIVATING,
+}
+
 sealed interface ModelInstallState {
     data object NotInstalled : ModelInstallState
-    data class Downloading(val bytesDone: Long, val bytesTotal: Long) : ModelInstallState {
+    data class Downloading(
+        val bytesDone: Long,
+        val bytesTotal: Long,
+        val phase: ModelInstallPhase = ModelInstallPhase.DOWNLOADING,
+    ) : ModelInstallState {
         val progress: Float get() = if (bytesTotal <= 0L) 0f else (bytesDone.toDouble() / bytesTotal.toDouble()).toFloat().coerceIn(0f, 1f)
     }
     data class Installed(val bytes: Long) : ModelInstallState

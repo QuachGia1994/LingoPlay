@@ -70,13 +70,40 @@ enum DurationFitPolicy {
         return Int(min(Int64(Int.max), max(Int64(sourceEndMs), speechEnd)))
     }
 
-    static func nextRateMultiplier(actualMs: Int, targetMs: Int, current: Float) -> Float? {
+    static func nextRateMultiplier(
+        actualMs: Int,
+        targetMs: Int,
+        current: Float,
+        maximum: Float = maxRateMultiplier
+    ) -> Float? {
         guard !fits(actualMs: actualMs, targetMs: targetMs) else { return nil }
-        guard current < maxRateMultiplier - 0.01 else { return nil }
+        let boundedMaximum = max(1, maximum)
+        guard current < boundedMaximum - 0.01 else { return nil }
         let ratio = Float(actualMs) / Float(max(1, targetMs))
         let proposed = max(current * 1.08, current * ratio * 1.02)
-        let next = min(maxRateMultiplier, proposed)
+        let next = min(boundedMaximum, proposed)
         return next > current + 0.01 ? next : nil
+    }
+}
+
+enum SystemVoiceRatePolicy {
+    static func baseRateScale(languageCode: String) -> Float {
+        normalized(languageCode) == "vi" ? 0.82 : 1.0
+    }
+
+    static func maximumFitMultiplier(languageCode: String) -> Float {
+        normalized(languageCode) == "vi" ? 1.18 : DurationFitPolicy.maxRateMultiplier
+    }
+
+    static func effectiveRateScale(languageCode: String, fitMultiplier: Float) -> Float {
+        baseRateScale(languageCode: languageCode) * min(
+            max(1, fitMultiplier),
+            maximumFitMultiplier(languageCode: languageCode)
+        )
+    }
+
+    private static func normalized(_ code: String) -> String {
+        code.lowercased().split(separator: "-").first.map(String.init) ?? code.lowercased()
     }
 }
 
@@ -178,7 +205,8 @@ final class SystemVietnameseTTSService {
             let next = DurationFitPolicy.nextRateMultiplier(
                 actualMs: durationMs,
                 targetMs: targetMs,
-                current: multiplier
+                current: multiplier,
+                maximum: SystemVoiceRatePolicy.maximumFitMultiplier(languageCode: voice.language)
             )
             let finalAttempt = attempt == DurationFitPolicy.maximumAttempts - 1
             if fits || next == nil || finalAttempt {
@@ -214,9 +242,13 @@ final class SystemVietnameseTTSService {
     ) async throws {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
+        let effectiveScale = SystemVoiceRatePolicy.effectiveRateScale(
+            languageCode: voice.language,
+            fitMultiplier: multiplier
+        )
         utterance.rate = min(
             AVSpeechUtteranceMaximumSpeechRate,
-            max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * multiplier)
+            max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * effectiveScale)
         )
         utterance.preUtteranceDelay = 0
         utterance.postUtteranceDelay = 0

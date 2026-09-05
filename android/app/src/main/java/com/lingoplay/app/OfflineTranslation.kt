@@ -91,7 +91,15 @@ object OfflineTranslationService {
 
         if (requiredModels.isEmpty()) {
             val copied = sourceSegments.map {
-                TranslationSegment(it.id, it.startMs, it.endMs, it.text, it.text)
+                TranslationSegment(
+                    it.id,
+                    it.startMs,
+                    it.endMs,
+                    it.text,
+                    it.text,
+                    it.speakerId,
+                    it.overlappingSpeakerIds,
+                )
             }
             onProgress(copied.size, copied.size)
             return@withContext TranslationDocument(
@@ -126,6 +134,8 @@ object OfflineTranslationService {
                     endMs = source.endMs,
                     sourceText = source.text,
                     translatedText = cleaned,
+                    speakerId = source.speakerId,
+                    overlappingSpeakerIds = source.overlappingSpeakerIds,
                 )
             }
             TranslationDocument(

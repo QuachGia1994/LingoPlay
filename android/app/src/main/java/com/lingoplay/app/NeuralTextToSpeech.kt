@@ -47,6 +47,41 @@ object OfflineDubbingTTSService {
         context: Context,
         document: TranslationDocument,
         preferredVoiceId: String?,
+        speakerVoiceMap: Map<String, String> = document.speakerVoiceMap,
+        onProgress: suspend (segment: Int, total: Int) -> Unit,
+    ): DubSpeechDocument {
+        if (speakerVoiceMap.isEmpty()) {
+            return synthesizeWithVoice(context, document, preferredVoiceId, onProgress)
+        }
+
+        val grouped = linkedMapOf<String?, MutableList<TranslationSegment>>()
+        document.segments.forEach { segment ->
+            val voiceId = segment.speakerId?.let(speakerVoiceMap::get) ?: preferredVoiceId
+            grouped.getOrPut(voiceId) { mutableListOf() } += segment
+        }
+        val output = mutableListOf<DubSpeechSegment>()
+        var completed = 0
+        for ((voiceId, segments) in grouped) {
+            val partial = synthesizeWithVoice(
+                context = context,
+                document = document.copy(segments = segments),
+                preferredVoiceId = voiceId,
+            ) { local, _ ->
+                onProgress(completed + local, document.segments.size)
+            }
+            output += partial.segments
+            completed += segments.size
+        }
+        return DubSpeechDocument(
+            voiceName = "Multi-speaker · ${grouped.size} voice${if (grouped.size == 1) "" else "s"}",
+            segments = output.sortedBy { segment -> document.segments.indexOfFirst { it.id == segment.id } },
+        )
+    }
+
+    private suspend fun synthesizeWithVoice(
+        context: Context,
+        document: TranslationDocument,
+        preferredVoiceId: String?,
         onProgress: suspend (segment: Int, total: Int) -> Unit,
     ): DubSpeechDocument {
         val neuralModel = NeuralVoiceModelStore.find(context)

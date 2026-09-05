@@ -24,6 +24,8 @@ data class LocalLibraryItem(
     val videoFile: File,
     val segments: List<TranslationSegment>,
     val translationMode: TranslationMode = TranslationMode.CLOUD,
+    val speakerMode: SpeakerMode = SpeakerMode.SINGLE,
+    val speakerVoiceMap: Map<String, String> = emptyMap(),
 ) {
     val languagePair: String
         get() = "${sourceLanguage.uppercase()} → ${targetLanguage.uppercase()}"
@@ -35,7 +37,7 @@ data class LocalLibraryItem(
 
     fun asTranslationDocument(): TranslationDocument? = segments
         .takeIf { it.isNotEmpty() }
-        ?.let { TranslationDocument(sourceLanguage, targetLanguage, it, translationMode) }
+        ?.let { TranslationDocument(sourceLanguage, targetLanguage, it, translationMode, speakerVoiceMap) }
 }
 
 object LocalLibraryStore {
@@ -83,6 +85,12 @@ object LocalLibraryStore {
                 videoFile = destination,
                 segments = translation?.segments.orEmpty(),
                 translationMode = translation?.mode ?: TranslationMode.CLOUD,
+                speakerMode = if (translation?.segments.orEmpty().any { it.speakerId != null || it.overlappingSpeakerIds.isNotEmpty() }) {
+                    SpeakerMode.MULTI
+                } else {
+                    SpeakerMode.SINGLE
+                },
+                speakerVoiceMap = translation?.speakerVoiceMap.orEmpty(),
             )
             File(directory, METADATA_NAME).writeText(item.toJson().toString(), Charsets.UTF_8)
             success = true
@@ -141,6 +149,10 @@ object LocalLibraryStore {
                         endMs = segment.getInt("endMs"),
                         sourceText = segment.optString("sourceText"),
                         translatedText = segment.optString("translatedText"),
+                        speakerId = segment.optString("speakerId").takeIf(String::isNotBlank),
+                        overlappingSpeakerIds = segment.optJSONArray("overlappingSpeakerIds")?.let { ids ->
+                            buildList { for (i in 0 until ids.length()) ids.optString(i).takeIf(String::isNotBlank)?.let(::add) }
+                        }.orEmpty(),
                     ),
                 )
             }
@@ -161,6 +173,13 @@ object LocalLibraryStore {
                 .takeIf(String::isNotBlank)
                 ?.let { value -> runCatching { TranslationMode.valueOf(value) }.getOrNull() }
                 ?: TranslationMode.CLOUD,
+            speakerMode = json.optString("speakerMode")
+                .takeIf(String::isNotBlank)
+                ?.let { value -> runCatching { SpeakerMode.valueOf(value) }.getOrNull() }
+                ?: SpeakerMode.SINGLE,
+            speakerVoiceMap = json.optJSONObject("speakerVoiceMap")?.let { mapJson ->
+                buildMap { mapJson.keys().forEach { key -> mapJson.optString(key).takeIf(String::isNotBlank)?.let { put(key, it) } } }
+            }.orEmpty(),
         )
     }.getOrNull()
 
@@ -173,6 +192,8 @@ object LocalLibraryStore {
         put("targetLanguage", targetLanguage)
         dubbingMode?.let { put("dubbingMode", it.name) }
         put("translationMode", translationMode.name)
+        put("speakerMode", speakerMode.name)
+        put("speakerVoiceMap", JSONObject().apply { speakerVoiceMap.forEach { (speakerId, voiceId) -> put(speakerId, voiceId) } })
         put("segments", JSONArray().apply {
             segments.forEach { segment ->
                 put(JSONObject().apply {
@@ -181,6 +202,8 @@ object LocalLibraryStore {
                     put("endMs", segment.endMs)
                     put("sourceText", segment.sourceText)
                     put("translatedText", segment.translatedText)
+                    put("speakerId", segment.speakerId ?: "")
+                    put("overlappingSpeakerIds", JSONArray(segment.overlappingSpeakerIds))
                 })
             }
         })

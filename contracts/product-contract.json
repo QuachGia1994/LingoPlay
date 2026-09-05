@@ -40,6 +40,28 @@
     "modelLicense": "MIT",
     "datasetLicense": "CC-BY-4.0"
   },
+  "multiSpeaker": {
+    "enabledByDefault": false,
+    "stableLabelsByFirstAppearance": true,
+    "overlapPolicy": "unknown",
+    "segmentationArchiveBytes": 6958444,
+    "segmentationArchiveSha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+    "segmentationModelBytes": 1540506,
+    "segmentationModelSha256": "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d",
+    "embeddingModelBytes": 40257283,
+    "embeddingModelSha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e"
+  },
+  "voiceCloning": {
+    "enabledByDefault": false,
+    "localOnly": true,
+    "requiresExplicitConsent": true,
+    "supportedLanguages": ["en", "zh"],
+    "referencePersistence": "ephemeral-current-run",
+    "archiveBytes": 109162785,
+    "archiveSha256": "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
+    "vocoderBytes": 54157409,
+    "vocoderSha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0"
+  },
   "offlineTranslation": {
     "modes": ["cloud", "offline"],
     "supportedLanguages": ["en", "vi", "ja", "zh"],
@@ -54,6 +76,6 @@
   "capabilities": {
     "cleanBackgroundVerified": false,
     "neuralVoiceEmotionEnabled": false,
-    "voiceCloningEnabled": false
+    "voiceCloningEnabled": true
   }
 }

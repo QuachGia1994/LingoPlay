@@ -57,6 +57,12 @@ final class AppModel {
     var translationMode = TranslationMode(rawValue: UserDefaults.standard.string(forKey: "lingoplay.translationMode") ?? "cloud") ?? .cloud {
         didSet { UserDefaults.standard.set(translationMode.rawValue, forKey: "lingoplay.translationMode") }
     }
+    var speakerMode = SpeakerMode(rawValue: UserDefaults.standard.string(forKey: "lingoplay.speakerMode") ?? "single") ?? .single {
+        didSet { UserDefaults.standard.set(speakerMode.rawValue, forKey: "lingoplay.speakerMode") }
+    }
+    var voiceCloningEnabled = UserDefaults.standard.bool(forKey: "lingoplay.voiceCloningEnabled") {
+        didSet { UserDefaults.standard.set(voiceCloningEnabled, forKey: "lingoplay.voiceCloningEnabled") }
+    }
     var dubbingMode = DubbingModePreset(rawValue: UserDefaults.standard.string(forKey: "lingoplay.dubbingMode") ?? "balanced") ?? .balanced {
         didSet { UserDefaults.standard.set(dubbingMode.rawValue, forKey: "lingoplay.dubbingMode") }
     }
@@ -75,11 +81,14 @@ final class AppModel {
     var selectedMedia: LocalMediaItem?
     var mediaState: MediaPreparationState = .idle
     var asrState: ASRState = .idle
+    var speakerState: SpeakerState = .idle
     var translationState: TranslationState = .idle
     var ttsState: TTSState = .idle
     var mixState: MixState = .idle
     var modelInstallState: ASRModelInstallState = .notInstalled
     var neuralVoiceInstallState: ASRModelInstallState = .notInstalled
+    var speakerModelInstallState: ASRModelInstallState = .notInstalled
+    var voiceCloningModelInstallState: ASRModelInstallState = .notInstalled
     var downloadedTranslationModelCodes: Set<String> = []
     var translationModelBusyCode: String?
     var translationModelError: String?
@@ -104,22 +113,27 @@ final class AppModel {
     private let asrModelStore = ASRModelStore()
     private let modelInstaller = WhisperModelInstaller()
     let neuralVoiceInstaller = NeuralVoicePackInstaller()
+    let speakerModelInstaller = SpeakerDiarizationModelInstaller()
+    let voiceCloningModelInstaller = VoiceCloningModelInstaller()
+    let speakerDiarizationService = SpeakerDiarizationService()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
-    private let translationService = TranslationService()
+    let translationService = TranslationService()
     let offlineTranslationModelManager = OfflineTranslationModelManager()
-    private let offlineTranslationService = OfflineTranslationService()
+    let offlineTranslationService = OfflineTranslationService()
     private let ttsService = OfflineDubbingTTSService()
     private let timelineMixService = TimelineMixService()
     private let libraryStore = LocalLibraryStore()
-    private let processingRecoveryStore = ProcessingRecoveryStore()
+    let processingRecoveryStore = ProcessingRecoveryStore()
     let diagnostics = LocalDiagnostics()
     private var playbackMixContext: PlaybackMixContext?
     private var playbackTimeObserver: Any?
     private var modelInstallTask: Task<Void, Never>?
     var neuralVoiceInstallTask: Task<Void, Never>?
+    var speakerModelInstallTask: Task<Void, Never>?
+    var voiceCloningModelInstallTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     private var activeProcessingRunID: UUID?
-    private var activeProcessingConfig: ProcessingConfig?
+    var activeProcessingConfig: ProcessingConfig?
 
     func finishSplash() {
         stage = .home
@@ -150,6 +164,7 @@ final class AppModel {
         activeProcessingConfig = nil
         mediaState = .importing
         asrState = .idle
+        speakerState = .idle
         translationState = .idle
         ttsState = .idle
         mixState = .idle
@@ -191,6 +206,7 @@ final class AppModel {
         }
         processingProgress = 0
         asrState = .idle
+        speakerState = .idle
         translationState = .idle
         ttsState = .idle
         mixState = .idle
@@ -207,10 +223,14 @@ final class AppModel {
         )
     }
 
-    private struct ProcessingRun {
+    struct ProcessingRun {
         let id: UUID
         let media: LocalMediaItem
         let config: ProcessingConfig
+
+        func replacingConfig(_ config: ProcessingConfig) -> ProcessingRun {
+            ProcessingRun(id: id, media: media, config: config)
+        }
     }
 
     private func launchProcessing(
@@ -253,7 +273,7 @@ final class AppModel {
         return task
     }
 
-    private func isActive(_ run: ProcessingRun) -> Bool {
+    func isActive(_ run: ProcessingRun) -> Bool {
         activeProcessingRunID == run.id &&
             !Task.isCancelled &&
             stage == .processing &&
@@ -302,7 +322,7 @@ final class AppModel {
             guard isActive(run) else { return }
             asrState = .completed(transcript)
             processingProgress = 0.4
-            await translateTranscript(transcript, run: run)
+            await resolveSpeakers(transcript, audioURL: audioURL, run: run)
         } catch {
             guard isActive(run) else { return }
             await diagnostics.record("asr_failed")
@@ -310,54 +330,19 @@ final class AppModel {
         }
     }
 
-    private func translateTranscript(_ transcript: ASRTranscript, run: ProcessingRun) async {
-        let updateProgress: @MainActor @Sendable (Int, Int) -> Void = { [weak self] item, total in
-            guard let self, self.isActive(run) else { return }
-            translationState = .translating(batch: item, totalBatches: total)
-            let ratio = total > 0 ? Double(item) / Double(total) : 0
-            processingProgress = 0.4 + (0.2 * ratio)
-        }
-
-        do {
-            let document: TranslationDocument
-            switch run.config.translationMode {
-            case .cloud:
-                guard let endpoint = translationEndpoint() else {
-                    guard isActive(run) else { return }
-                    translationState = .endpointMissing
-                    return
-                }
-                document = try await translationService.translate(
-                    transcript: transcript,
-                    targetLanguage: run.config.targetLanguage.code,
-                    endpoint: endpoint,
-                    progress: updateProgress
-                )
-            case .offline:
-                document = try await offlineTranslationService.translate(
-                    transcript: transcript,
-                    targetLanguage: run.config.targetLanguage.code,
-                    progress: updateProgress
-                )
-            }
-            guard isActive(run) else { return }
-            translationState = .completed(document)
-            processingProgress = 0.6
-            await synthesizeOfflineSpeech(document, run: run)
-        } catch {
-            guard isActive(run) else { return }
-            await diagnostics.record("translation_failed")
-            translationState = .failed(error.localizedDescription)
-        }
-    }
-
-    private func synthesizeOfflineSpeech(_ document: TranslationDocument, run: ProcessingRun) async {
+    func synthesizeOfflineSpeech(
+        _ document: TranslationDocument,
+        cloneReferences: [String: VoiceCloneReference],
+        run: ProcessingRun
+    ) async {
         guard isActive(run) else { return }
         do {
             ttsState = .synthesizing(segment: 0, totalSegments: document.segments.count)
             let dub = try await ttsService.synthesize(
                 document: document,
-                preferredVoiceIdentifier: run.config.preferredVoiceIdentifier
+                preferredVoiceIdentifier: run.config.preferredVoiceIdentifier,
+                speakerVoiceMap: run.config.speakerVoiceMap,
+                cloneReferences: cloneReferences
             ) { [weak self] segment, total in
                 guard let self, self.isActive(run) else { return }
                 ttsState = .synthesizing(segment: segment, totalSegments: total)
@@ -445,7 +430,7 @@ final class AppModel {
         }
     }
 
-    private func translationEndpoint() -> URL? {
+    func translationEndpoint() -> URL? {
         let configured = Bundle.main.object(
             forInfoDictionaryKey: TranslationEndpointConfiguration.infoDictionaryKey
         ) as? String
@@ -466,6 +451,8 @@ final class AppModel {
     func refreshModelState() async {
         modelInstallState = await modelInstaller.state()
         neuralVoiceInstallState = await neuralVoiceInstaller.state()
+        speakerModelInstallState = await speakerModelInstaller.state()
+        voiceCloningModelInstallState = await voiceCloningModelInstaller.state()
     }
 
     func installSpeechModel() {
@@ -505,6 +492,17 @@ final class AppModel {
         modelInstallTask?.cancel()
     }
 
+    func resumeProcessingAfterSpeakerModelInstall() {
+        guard case .audioReady(let audioURL) = mediaState,
+              speakerState == .modelMissing,
+              stage == .processing,
+              let media = selectedMedia
+        else { return }
+        let config = activeProcessingConfig ?? currentProcessingConfig()
+        activeProcessingConfig = config
+        launchProcessing(media: media, config: config, preparedAudioURL: audioURL)
+    }
+
     func resumePendingProcessing() {
         guard let recovery = pendingRecovery else { return }
         Task { await diagnostics.record("recovery_resumed") }
@@ -513,6 +511,7 @@ final class AppModel {
         activeProcessingConfig = config
         processingProgress = recovery.canResumeFromAudio ? 0.2 : 0
         asrState = .idle
+        speakerState = .idle
         translationState = .idle
         ttsState = .idle
         mixState = .idle
@@ -591,7 +590,8 @@ final class AppModel {
                     sourceLanguage: item.sourceLanguage,
                     targetLanguage: item.targetLanguage,
                     segments: item.segments,
-                    mode: item.translationMode ?? .cloud
+                    mode: item.translationMode ?? .cloud,
+                    speakerVoiceMap: item.speakerVoiceMap
                 )
             )
         }
@@ -735,7 +735,10 @@ final class AppModel {
             preferredVoiceIdentifier: preferredVoiceIdentifier,
             dubbingMode: dubbingMode,
             subtitleMode: subtitleMode,
-            translationMode: translationMode
+            translationMode: translationMode,
+            speakerMode: speakerMode,
+            speakerVoiceMap: [:],
+            voiceCloningEnabled: voiceCloningEnabled
         )
     }
 

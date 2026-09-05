@@ -36,6 +36,8 @@ struct ProcessingView: View {
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Understanding speech", state: speechStageState)
                     Divider().overlay(LPTheme.border)
+                    ProcessingStageRow(title: "Finding speakers", state: speakerStageState)
+                    Divider().overlay(LPTheme.border)
                     ProcessingStageRow(title: "Translating", state: translationStageState)
                     Divider().overlay(LPTheme.border)
                     ProcessingStageRow(
@@ -63,6 +65,24 @@ struct ProcessingView: View {
                             .font(.subheadline)
                             .lineLimit(5)
                         Text("\(transcript.segments.count) timestamped segments · local only")
+                            .font(.caption2)
+                            .foregroundStyle(LPTheme.secondaryText)
+                    }
+                    .lpCard()
+                }
+
+                if case .completed(let speakers) = model.speakerState {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Speakers detected", systemImage: "person.2.wave.2.fill")
+                                .font(.headline)
+                                .foregroundStyle(LPTheme.accent)
+                            Spacer()
+                            Text("\(speakers.speakerIDs.count) speakers")
+                                .font(.caption2.bold())
+                                .foregroundStyle(LPTheme.cyan)
+                        }
+                        Text("\(speakers.turns.count) local speaker turns · overlapping or ambiguous speech remains unassigned instead of guessed")
                             .font(.caption2)
                             .foregroundStyle(LPTheme.secondaryText)
                     }
@@ -101,6 +121,16 @@ struct ProcessingView: View {
 
                 if case .modelMissing = model.asrState {
                     SpeechModelManagementCard(model: model)
+                }
+
+                if case .modelMissing = model.speakerState {
+                    SpeakerModelManagementCard(model: model)
+                }
+
+                if model.speakerMode == .multi,
+                   model.voiceCloningEnabled,
+                   VoiceCloningPolicy.supportsTarget(model.targetLanguageChoice.code) {
+                    VoiceCloningModelManagementCard(model: model)
                 }
 
                 if case .endpointMissing = model.translationState {
@@ -171,6 +201,13 @@ struct ProcessingView: View {
                         .lpCard()
                 }
 
+                if case .failed(let message) = model.speakerState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lpCard()
+                }
+
                 if case .failed(let message) = model.translationState {
                     Text(message)
                         .font(.caption)
@@ -208,7 +245,12 @@ struct ProcessingView: View {
             case .loadingModel: return "Loading local speech model"
             case .transcribing: return "Understanding speech on-device"
             case .completed:
-                switch model.translationState {
+                switch model.speakerState {
+                case .modelMissing: return "Speech ready · Speaker AI not installed"
+                case .analyzing: return "Finding speakers on-device"
+                case .failed: return "Speaker analysis stopped"
+                case .idle, .completed:
+                    switch model.translationState {
                 case .translating: return "Translating transcript"
                 case .completed:
                     switch model.ttsState {
@@ -225,9 +267,10 @@ struct ProcessingView: View {
                     case .failed: return "Offline voice synthesis stopped"
                     case .idle: return "Translation ready"
                     }
-                case .endpointMissing: return "Speech ready · translation not configured"
-                case .failed: return "Translation stopped"
-                case .idle: return "Speech recognized locally"
+                    case .endpointMissing: return "Speech ready · translation not configured"
+                    case .failed: return "Translation stopped"
+                    case .idle: return "Speech recognized locally"
+                    }
                 }
             case .failed: return "Speech recognition stopped"
             case .idle: return "Audio ready"
@@ -255,6 +298,16 @@ struct ProcessingView: View {
         case .completed: .complete
         case .failed: .failed
         case .idle: .pending
+        }
+    }
+
+    private var speakerStageState: ProcessingStageRow.State {
+        switch model.speakerState {
+        case .modelMissing: .blocked
+        case .analyzing: .active
+        case .completed: .complete
+        case .failed: .failed
+        case .idle: model.speakerMode == .single ? .complete : .pending
         }
     }
 
@@ -351,7 +404,7 @@ private struct ProcessingStageRow: View {
         case .complete: "Completed"
         case .active: "In progress"
         case .pending: "Pending"
-        case .blocked: "ASR not installed"
+        case .blocked: "Model not installed"
         case .configurationMissing: "Not configured"
         case .voiceMissing: "Voice not installed"
         case .failed: "Failed"

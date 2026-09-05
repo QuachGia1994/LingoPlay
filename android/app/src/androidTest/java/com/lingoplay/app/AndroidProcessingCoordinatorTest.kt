@@ -141,10 +141,31 @@ class AndroidProcessingCoordinatorTest {
             return SherpaWhisperModel(encoder, decoder, tokens)
         }
 
-        override suspend fun transcribe(audioFile: File, model: SherpaWhisperModel, sourceLanguageCode: String?): ASRTranscript {
+        override suspend fun transcribe(
+            audioFile: File,
+            model: SherpaWhisperModel,
+            sourceLanguageCode: String?,
+            speakerMode: SpeakerMode,
+        ): ASRTranscript {
             calls += "asr:${sourceLanguageCode ?: "auto"}"
             return ASRTranscript("en", "hello", listOf(ASRSegment(0, 0f, 1f, "hello")))
         }
+
+        override fun findSpeakerModel(): SpeakerDiarizationModel? = null
+
+        override suspend fun diarize(
+            audioFile: File,
+            model: SpeakerDiarizationModel,
+        ): SpeakerDiarizationDocument = SpeakerDiarizationDocument(emptyList(), emptyList())
+
+        override suspend fun availableVoices(): List<OfflineVoiceOption> = emptyList()
+
+        override fun voiceCloningModelInstalled(): Boolean = false
+
+        override suspend fun buildVoiceCloneReferences(
+            audioFile: File,
+            transcript: ASRTranscript,
+        ): Map<String, VoiceCloneReference> = emptyMap()
 
         override suspend fun translate(
             transcript: ASRTranscript,
@@ -160,6 +181,8 @@ class AndroidProcessingCoordinatorTest {
         override suspend fun synthesize(
             document: TranslationDocument,
             preferredVoiceId: String?,
+            speakerVoiceMap: Map<String, String>,
+            cloneReferences: Map<String, VoiceCloneReference>,
             onProgress: suspend (Int, Int) -> Unit,
         ): DubSpeechDocument {
             calls += "tts:${preferredVoiceId ?: "auto"}"

@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.File
 
 internal object TTSCachePolicy {
-    private val cacheFamilies = setOf("tts", "neural-tts")
+    private val cacheFamilies = setOf("tts", "neural-tts", "clone-tts")
 
     fun cleanup(document: DubSpeechDocument) {
         sessionDirectories(document).forEach(File::deleteRecursively)

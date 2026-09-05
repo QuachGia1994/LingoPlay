@@ -132,6 +132,9 @@ fun LingoPlayApp() {
     var asrPhaseName by rememberSaveable { mutableStateOf(ASRPhase.IDLE.name) }
     var asrTranscript by remember { mutableStateOf<ASRTranscript?>(null) }
     var asrError by rememberSaveable { mutableStateOf<String?>(null) }
+    var speakerPhaseName by rememberSaveable { mutableStateOf(SpeakerPhase.IDLE.name) }
+    var speakerDocument by remember { mutableStateOf<SpeakerDiarizationDocument?>(null) }
+    var speakerError by rememberSaveable { mutableStateOf<String?>(null) }
     var translationPhaseName by rememberSaveable { mutableStateOf(TranslationPhase.IDLE.name) }
     var translationDocument by remember { mutableStateOf<TranslationDocument?>(null) }
     var translationError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -158,6 +161,8 @@ fun LingoPlayApp() {
     val sourceLanguage = dubbingState.sourceLanguage
     val targetLanguage = dubbingState.targetLanguage
     val translationMode = dubbingState.translationMode
+    val speakerMode = dubbingState.speakerMode
+    val voiceCloningEnabled = dubbingState.voiceCloningEnabled
     val dubbingMode = dubbingState.dubbingMode
     val subtitleMode = dubbingState.subtitleMode
     val playbackSpeed = dubbingState.playbackSpeed
@@ -166,6 +171,8 @@ fun LingoPlayApp() {
     val cycleSourceLanguage: () -> Unit = dubbingState::cycleSourceLanguage
     val cycleTargetLanguage: () -> Unit = dubbingState::cycleTargetLanguage
     val cycleTranslationMode: () -> Unit = dubbingState::cycleTranslationMode
+    val cycleSpeakerMode: () -> Unit = dubbingState::cycleSpeakerMode
+    val setVoiceCloningEnabled: (Boolean) -> Unit = dubbingState::updateVoiceCloningConsent
     val cycleDubbingMode: () -> Unit = dubbingState::cycleDubbingMode
     val cycleSubtitleMode: () -> Unit = dubbingState::cycleSubtitleMode
     val cycleVoice: () -> Unit = dubbingState::cycleVoice
@@ -173,14 +180,14 @@ fun LingoPlayApp() {
     val uiPreferences = remember(context) { context.getSharedPreferences("lingoplay_ui", Context.MODE_PRIVATE) }
     var wifiOnly by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("wifi_only", true)) }
     var highContrast by rememberSaveable { mutableStateOf(uiPreferences.getBoolean("high_contrast", false)) }
-    var modelInstallState by remember { mutableStateOf<ModelInstallState>(ASRModelInstaller.state(context)) }
-    var modelInstallJob by remember { mutableStateOf<Job?>(null) }
-    var neuralVoiceInstallState by remember { mutableStateOf<ModelInstallState>(NeuralVoicePackInstaller.state(context)) }
-    var neuralVoiceInstallJob by remember { mutableStateOf<Job?>(null) }
-    var downloadedTranslationModelCodes by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var translationModelBusyCode by remember { mutableStateOf<String?>(null) }
-    var translationModelError by remember { mutableStateOf<String?>(null) }
-    var translationModelJob by remember { mutableStateOf<Job?>(null) }
+    val stage19Models = rememberStage19ModelLifecycleState(context)
+    val modelInstallState = stage19Models.speechState
+    val neuralVoiceInstallState = stage19Models.neuralState
+    val speakerModelInstallState = stage19Models.speakerState
+    val cloningModelInstallState = stage19Models.cloningState
+    val downloadedTranslationModelCodes = stage19Models.downloadedTranslationModelCodes
+    val translationModelBusyCode = stage19Models.translationModelBusyCode
+    val translationModelError = stage19Models.translationModelError
     var uiLanguageName by rememberSaveable {
         mutableStateOf(uiPreferences.getString("ui_language", UiLanguage.ENGLISH.name) ?: UiLanguage.ENGLISH.name)
     }
@@ -189,118 +196,63 @@ fun LingoPlayApp() {
     val tab = Tab.valueOf(tabName)
     val preparationState = MediaPreparationState.valueOf(mediaState)
     val asrPhase = ASRPhase.valueOf(asrPhaseName)
+    val speakerPhase = SpeakerPhase.valueOf(speakerPhaseName)
     val translationPhase = TranslationPhase.valueOf(translationPhaseName)
     val ttsPhase = TTSPhase.valueOf(ttsPhaseName)
     val mixPhase = MixPhase.valueOf(mixPhaseName)
-    val modelInstalled = modelInstallState is ModelInstallState.Installed
+    val modelInstalled = stage19Models.speechInstalled
+    val speakerModelInstalled = stage19Models.speakerInstalled
     val startModelInstall: () -> Unit = {
-        if (modelInstallJob == null) {
-            modelInstallJob = scope.launch {
-                try {
-                    val installed = ASRModelInstaller.install(context, wifiOnly) { progress ->
-                        withContext(Dispatchers.Main.immediate) { modelInstallState = progress }
-                    }
-                    modelInstallState = ModelInstallState.Installed(
-                        installed.encoder.length() + installed.decoder.length() + installed.tokens.length(),
-                    )
-                    if (stageName == Stage.PROCESSING.name && asrPhaseName == ASRPhase.MODEL_MISSING.name) {
-                        asrPhaseName = ASRPhase.IDLE.name
-                    }
-                } catch (cancelled: CancellationException) {
-                    modelInstallState = ASRModelInstaller.state(context)
-                    throw cancelled
-                } catch (error: Throwable) {
-                    modelInstallState = ModelInstallState.Failed(error.message ?: "Speech AI installation failed.")
-                } finally {
-                    modelInstallJob = null
-                }
+        stage19Models.installSpeech(wifiOnly) {
+            if (stageName == Stage.PROCESSING.name && asrPhaseName == ASRPhase.MODEL_MISSING.name) {
+                asrPhaseName = ASRPhase.IDLE.name
             }
         }
     }
-    val cancelModelInstall: () -> Unit = {
-        modelInstallJob?.cancel()
-    }
+    val cancelModelInstall: () -> Unit = stage19Models::cancelSpeech
     val deleteModel: () -> Unit = {
-        if (asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING) {
-            modelInstallJob?.cancel()
-            modelInstallJob = null
-            ASRModelInstaller.deleteInstalled(context)
-            modelInstallState = ModelInstallState.NotInstalled
-        }
+        stage19Models.deleteSpeech(
+            canDelete = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
+        )
     }
     val refreshVoiceOptions: suspend () -> Unit = {
         dubbingState.updateOfflineVoices(OfflineDubbingTTSService.availableVoices(context))
     }
     val startNeuralVoiceInstall: () -> Unit = {
-        if (neuralVoiceInstallJob == null) {
-            neuralVoiceInstallJob = scope.launch {
-                try {
-                    NeuralVoicePackInstaller.install(context, wifiOnly) { progress ->
-                        withContext(Dispatchers.Main.immediate) { neuralVoiceInstallState = progress }
-                    }
-                    neuralVoiceInstallState = NeuralVoicePackInstaller.state(context)
-                    refreshVoiceOptions()
-                } catch (cancelled: CancellationException) {
-                    neuralVoiceInstallState = NeuralVoicePackInstaller.state(context)
-                    throw cancelled
-                } catch (error: Throwable) {
-                    neuralVoiceInstallState = ModelInstallState.Failed(
-                        error.message ?: "Neural Voice installation failed.",
-                    )
-                } finally {
-                    neuralVoiceInstallJob = null
-                }
-            }
-        }
+        stage19Models.installNeural(wifiOnly, refreshVoiceOptions)
     }
-    val cancelNeuralVoiceInstall: () -> Unit = {
-        neuralVoiceInstallJob?.cancel()
-    }
+    val cancelNeuralVoiceInstall: () -> Unit = stage19Models::cancelNeural
     val deleteNeuralVoice: () -> Unit = {
-        if (ttsPhase != TTSPhase.SYNTHESIZING) {
-            neuralVoiceInstallJob?.cancel()
-            neuralVoiceInstallJob = null
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) { NeuralVoicePackInstaller.deleteInstalled(context) }
-                    neuralVoiceInstallState = ModelInstallState.NotInstalled
-                    refreshVoiceOptions()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Throwable) {
-                    neuralVoiceInstallState = ModelInstallState.Failed(
-                        error.message ?: "Unable to delete the installed Neural Voice pack.",
-                    )
-                }
+        stage19Models.deleteNeural(
+            canDelete = ttsPhase != TTSPhase.SYNTHESIZING,
+            onChanged = refreshVoiceOptions,
+        )
+    }
+
+    val startSpeakerModelInstall: () -> Unit = {
+        stage19Models.installSpeaker(wifiOnly) {
+            if (stageName == Stage.PROCESSING.name && speakerPhaseName == SpeakerPhase.MODEL_MISSING.name) {
+                speakerPhaseName = SpeakerPhase.IDLE.name
             }
         }
+    }
+    val cancelSpeakerModelInstall: () -> Unit = stage19Models::cancelSpeaker
+    val deleteSpeakerModel: () -> Unit = {
+        stage19Models.deleteSpeaker(canDelete = speakerPhase != SpeakerPhase.ANALYZING)
+    }
+
+    val startCloningModelInstall: () -> Unit = { stage19Models.installCloning(wifiOnly) }
+    val cancelCloningModelInstall: () -> Unit = stage19Models::cancelCloning
+    val deleteCloningModel: () -> Unit = {
+        stage19Models.deleteCloning(canDelete = ttsPhase != TTSPhase.SYNTHESIZING)
     }
 
     val toggleTranslationModel: (String) -> Unit = { code ->
-        if (translationModelJob == null && translationPhaseName != TranslationPhase.TRANSLATING.name) {
-            translationModelBusyCode = code
-            translationModelError = null
-            translationModelJob = scope.launch {
-                try {
-                    if (code in downloadedTranslationModelCodes) {
-                        OfflineTranslationModelManager.delete(code)
-                    } else {
-                        OfflineTranslationModelManager.download(code, wifiOnly)
-                    }
-                    downloadedTranslationModelCodes = OfflineTranslationModelManager.downloadedCodes()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Throwable) {
-                    translationModelError = error.message ?: "Unable to update the offline translation model."
-                    downloadedTranslationModelCodes = runCatching {
-                        OfflineTranslationModelManager.downloadedCodes()
-                    }.getOrDefault(downloadedTranslationModelCodes)
-                } finally {
-                    translationModelBusyCode = null
-                    translationModelJob = null
-                }
-            }
-        }
+        stage19Models.toggleTranslationModel(
+            code = code,
+            wifiOnly = wifiOnly,
+            canManage = translationPhaseName != TranslationPhase.TRANSLATING.name,
+        )
     }
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -321,6 +273,9 @@ fun LingoPlayApp() {
                 asrPhaseName = ASRPhase.IDLE.name
                 asrTranscript = null
                 asrError = null
+                speakerPhaseName = SpeakerPhase.IDLE.name
+                speakerDocument = null
+                speakerError = null
                 translationPhaseName = TranslationPhase.IDLE.name
                 translationDocument = null
                 translationError = null
@@ -359,11 +314,7 @@ fun LingoPlayApp() {
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)
         refreshVoiceOptions()
-        try {
-            downloadedTranslationModelCodes = OfflineTranslationModelManager.downloadedCodes()
-        } catch (error: Throwable) {
-            translationModelError = error.message ?: "Unable to inspect offline translation models."
-        }
+        stage19Models.refreshTranslationModels()
         if (pendingRecovery != null) LocalDiagnostics.record(context, "recovery_available")
         if (stageName == Stage.SPLASH.name) {
             delay(900)
@@ -378,7 +329,7 @@ fun LingoPlayApp() {
         )
     }
 
-    LaunchedEffect(stageName, modelInstalled) {
+    LaunchedEffect(stageName, modelInstalled, speakerModelInstalled) {
         processingGate.run {
             val media = selectedMedia
             val reusableAudio = preparedAudioFile?.takeIf(File::isFile)
@@ -389,6 +340,7 @@ fun LingoPlayApp() {
 
             mediaError = null
             asrError = null
+            speakerError = null
             translationError = null
             ttsError = null
             mixError = null
@@ -412,6 +364,14 @@ fun LingoPlayApp() {
                         is ProcessingEvent.TranscriptReady -> {
                             asrTranscript = event.transcript
                             asrPhaseName = ASRPhase.COMPLETED.name
+                        }
+                        ProcessingEvent.DiarizationStarted -> {
+                            speakerError = null
+                            speakerPhaseName = SpeakerPhase.ANALYZING.name
+                        }
+                        is ProcessingEvent.DiarizationReady -> {
+                            speakerDocument = event.document
+                            speakerPhaseName = SpeakerPhase.COMPLETED.name
                         }
                         ProcessingEvent.TranslationStarted -> {
                             translationError = null
@@ -447,6 +407,11 @@ fun LingoPlayApp() {
 
             when (outcome) {
                 ProcessingOutcome.ModelMissing -> asrPhaseName = ASRPhase.MODEL_MISSING.name
+                ProcessingOutcome.SpeakerModelMissing -> speakerPhaseName = SpeakerPhase.MODEL_MISSING.name
+                ProcessingOutcome.CloningModelMissing -> {
+                    ttsPhaseName = TTSPhase.FAILED.name
+                    ttsError = "Voice Cloning model required. Install the optional local model in Settings; cloning never falls back to cloud."
+                }
                 ProcessingOutcome.TranslationEndpointMissing -> translationPhaseName = TranslationPhase.ENDPOINT_MISSING.name
                 ProcessingOutcome.VoiceMissing -> ttsPhaseName = TTSPhase.VOICE_MISSING.name
                 is ProcessingOutcome.Failed -> when (outcome.step) {
@@ -457,6 +422,10 @@ fun LingoPlayApp() {
                     ProcessingFailureStep.ASR -> {
                         asrPhaseName = ASRPhase.FAILED.name
                         asrError = outcome.message
+                    }
+                    ProcessingFailureStep.DIARIZATION -> {
+                        speakerPhaseName = SpeakerPhase.FAILED.name
+                        speakerError = outcome.message
                     }
                     ProcessingFailureStep.TRANSLATION -> {
                         translationPhaseName = TranslationPhase.FAILED.name
@@ -581,6 +550,9 @@ fun LingoPlayApp() {
                         asrPhase = asrPhase,
                         transcript = asrTranscript,
                         asrError = asrError,
+                        speakerPhase = speakerPhase,
+                        speakerDocument = speakerDocument,
+                        speakerError = speakerError,
                         translationPhase = translationPhase,
                         translation = translationDocument,
                         translationError = translationError,
@@ -595,8 +567,11 @@ fun LingoPlayApp() {
                         mixResult = mixResult,
                         mixError = mixError,
                         modelInstallState = modelInstallState,
+                        speakerModelInstallState = speakerModelInstallState,
                         onInstallModel = startModelInstall,
                         onCancelModel = cancelModelInstall,
+                        onInstallSpeakerModel = startSpeakerModelInstall,
+                        onCancelSpeakerModel = cancelSpeakerModelInstall,
                         onBack = backFromProcessing,
                     )
 
@@ -644,6 +619,9 @@ fun LingoPlayApp() {
                                 asrPhaseName = ASRPhase.IDLE.name
                                 asrTranscript = null
                                 asrError = null
+                                speakerPhaseName = SpeakerPhase.IDLE.name
+                                speakerDocument = null
+                                speakerError = null
                                 translationPhaseName = TranslationPhase.IDLE.name
                                 translationDocument = null
                                 translationError = null
@@ -709,12 +687,18 @@ fun LingoPlayApp() {
                             subtitleMode = subtitleMode,
                             targetLanguage = targetLanguage,
                             translationMode = translationMode,
+                            speakerMode = speakerMode,
+                            voiceCloningEnabled = voiceCloningEnabled,
                             voiceLabel = preferredVoiceLabel,
                             isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
                             canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
                             neuralVoiceInstallState = neuralVoiceInstallState,
                             canDeleteNeuralVoice = ttsPhase != TTSPhase.SYNTHESIZING,
+                            speakerModelInstallState = speakerModelInstallState,
+                            canDeleteSpeakerModel = speakerPhase != SpeakerPhase.ANALYZING,
+                            cloningModelInstallState = cloningModelInstallState,
+                            canDeleteCloningModel = ttsPhase != TTSPhase.SYNTHESIZING,
                             downloadedTranslationModelCodes = downloadedTranslationModelCodes,
                             translationModelBusyCode = translationModelBusyCode,
                             translationModelError = translationModelError,
@@ -725,6 +709,12 @@ fun LingoPlayApp() {
                             onInstallNeuralVoice = startNeuralVoiceInstall,
                             onCancelNeuralVoice = cancelNeuralVoiceInstall,
                             onDeleteNeuralVoice = deleteNeuralVoice,
+                            onInstallSpeakerModel = startSpeakerModelInstall,
+                            onCancelSpeakerModel = cancelSpeakerModelInstall,
+                            onDeleteSpeakerModel = deleteSpeakerModel,
+                            onInstallCloningModel = startCloningModelInstall,
+                            onCancelCloningModel = cancelCloningModelInstall,
+                            onDeleteCloningModel = deleteCloningModel,
                             onToggleTranslationModel = toggleTranslationModel,
                             onToggleAppearance = {
                                 highContrast = !highContrast
@@ -742,6 +732,8 @@ fun LingoPlayApp() {
                             onSubtitleMode = cycleSubtitleMode,
                             onTargetLanguage = cycleTargetLanguage,
                             onTranslationMode = cycleTranslationMode,
+                            onSpeakerMode = cycleSpeakerMode,
+                            onVoiceCloningEnabled = setVoiceCloningEnabled,
                             onVoice = cycleVoice,
                             onPlus = { stageName = Stage.PLUS.name },
                             onAbout = { stageName = Stage.ABOUT.name },

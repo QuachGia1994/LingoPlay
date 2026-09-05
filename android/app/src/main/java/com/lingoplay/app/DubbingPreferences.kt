@@ -73,6 +73,9 @@ data class ProcessingConfig(
     val dubbingMode: DubbingModePreset,
     val subtitleMode: SubtitleMode,
     val translationMode: TranslationMode = TranslationMode.CLOUD,
+    val speakerMode: SpeakerMode = SpeakerMode.SINGLE,
+    val speakerVoiceMap: Map<String, String> = emptyMap(),
+    val voiceCloningEnabled: Boolean = false,
 )
 
 data class ProcessingConfigRecord(
@@ -82,6 +85,9 @@ data class ProcessingConfigRecord(
     val dubbingMode: String,
     val subtitleMode: String,
     val translationMode: String = TranslationMode.CLOUD.name,
+    val speakerMode: String = SpeakerMode.SINGLE.name,
+    val speakerVoiceMap: Map<String, String> = emptyMap(),
+    val voiceCloningEnabled: Boolean = false,
 )
 
 fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord(
@@ -91,6 +97,9 @@ fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord
     dubbingMode = dubbingMode.name,
     subtitleMode = subtitleMode.name,
     translationMode = translationMode.name,
+    speakerMode = speakerMode.name,
+    speakerVoiceMap = speakerVoiceMap,
+    voiceCloningEnabled = voiceCloningEnabled,
 )
 
 fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
@@ -101,6 +110,9 @@ fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
         dubbingMode = DubbingModePreset.valueOf(dubbingMode),
         subtitleMode = SubtitleMode.valueOf(subtitleMode),
         translationMode = TranslationMode.valueOf(translationMode),
+        speakerMode = SpeakerMode.valueOf(speakerMode),
+        speakerVoiceMap = speakerVoiceMap.filterKeys { it.matches(Regex("speaker_[1-9][0-9]*")) },
+        voiceCloningEnabled = voiceCloningEnabled,
     )
 }.getOrNull()
 
@@ -121,6 +133,8 @@ interface DubbingPreferencePersistence {
     var subtitleMode: SubtitleMode
     var playbackSpeed: Float
     var preferredVoiceId: String?
+    var speakerMode: SpeakerMode
+    var voiceCloningEnabled: Boolean
 }
 
 class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
@@ -153,6 +167,14 @@ class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
     override var preferredVoiceId: String?
         get() = prefs.getString("preferred_voice_id", null)?.takeIf(String::isNotBlank)
         set(value) = prefs.edit().putString("preferred_voice_id", value.orEmpty()).apply()
+
+    override var speakerMode: SpeakerMode
+        get() = enumValue("speaker_mode", SpeakerMode.SINGLE)
+        set(value) = prefs.edit().putString("speaker_mode", value.name).apply()
+
+    override var voiceCloningEnabled: Boolean
+        get() = prefs.getBoolean("voice_cloning_enabled", false)
+        set(value) = prefs.edit().putBoolean("voice_cloning_enabled", value).apply()
 
     private inline fun <reified T : Enum<T>> enumValue(key: String, fallback: T): T =
         runCatching { enumValueOf<T>(prefs.getString(key, fallback.name) ?: fallback.name) }.getOrDefault(fallback)

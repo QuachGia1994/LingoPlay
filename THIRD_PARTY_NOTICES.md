@@ -26,6 +26,20 @@ Source and license: https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.7
 
 Pinned source commit: 917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e.
 
+### Stage 19 speaker diarization model packs
+
+The optional Speaker AI feature downloads sherpa-onnx release artifacts only after explicit user action: `sherpa-onnx-pyannote-segmentation-3-0.tar.bz2` and `nemo_en_titanet_small.onnx`. LingoPlay pins their exact sizes and SHA-256 identities in `contracts/product-contract.json`; they are not bundled in the base application. Speaker analysis runs locally and LingoPlay does not upload the analyzed audio.
+
+Upstream model examples/releases: https://github.com/k2-fsa/sherpa-onnx
+
+### Stage 19 ZipVoice/Vocos cloning model packs
+
+The optional local Voice Cloning feature downloads the sherpa-onnx `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2` pack together with `vocos_24khz.onnx` only after explicit user action. LingoPlay pins exact byte sizes and SHA-256 identities in `contracts/product-contract.json`; the packs are not bundled in the base application. The feature is limited by LingoPlay to English/Chinese output, is disabled by default, requires explicit ownership/permission consent, and uses only an ephemeral clear single-speaker reference from the current processing run. LingoPlay does not persist a reusable cloned-voice profile or upload the reference audio.
+
+Upstream ZipVoice/Vocos examples/releases: https://github.com/k2-fsa/sherpa-onnx
+
+These model-pack provenance notes do not add a license claim beyond the licenses published by the respective upstream artifacts; redistribution/release review must retain the upstream notices applicable to the exact downloaded model versions.
+
 ## Vietnamese VAIS1000 VITS/Piper voice pack
 
 Voice pack: vits-piper-vi_VN-vais1000-medium.

@@ -216,7 +216,9 @@ final class OfflineTranslationService {
                     startMs: source.startMs,
                     endMs: source.endMs,
                     sourceText: source.text,
-                    translatedText: source.text
+                    translatedText: source.text,
+                    speakerID: source.speakerID,
+                    overlappingSpeakerIDs: source.overlappingSpeakerIDs
                 )
             }
             progress(copied.count, copied.count)
@@ -251,7 +253,9 @@ final class OfflineTranslationService {
                     startMs: source.startMs,
                     endMs: source.endMs,
                     sourceText: source.text,
-                    translatedText: cleaned
+                    translatedText: cleaned,
+                    speakerID: source.speakerID,
+                    overlappingSpeakerIDs: source.overlappingSpeakerIDs
                 )
             )
             progress(index + 1, sourceSegments.count)

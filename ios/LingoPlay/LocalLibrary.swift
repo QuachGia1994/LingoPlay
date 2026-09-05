@@ -9,8 +9,59 @@ struct LocalLibraryItem: Identifiable, Codable, Sendable, Equatable {
     let targetLanguage: String
     let dubbingMode: DubbingModePreset?
     let translationMode: TranslationMode?
+    let speakerMode: SpeakerMode
+    let speakerVoiceMap: [String: String]
     let videoFileName: String
     let segments: [TranslationSegment]
+
+    init(
+        id: UUID,
+        title: String,
+        duration: TimeInterval,
+        createdAt: Date,
+        sourceLanguage: String,
+        targetLanguage: String,
+        dubbingMode: DubbingModePreset?,
+        translationMode: TranslationMode?,
+        speakerMode: SpeakerMode = .single,
+        speakerVoiceMap: [String: String] = [:],
+        videoFileName: String,
+        segments: [TranslationSegment]
+    ) {
+        self.id = id
+        self.title = title
+        self.duration = duration
+        self.createdAt = createdAt
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.dubbingMode = dubbingMode
+        self.translationMode = translationMode
+        self.speakerMode = speakerMode
+        self.speakerVoiceMap = speakerVoiceMap
+        self.videoFileName = videoFileName
+        self.segments = segments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, duration, createdAt, sourceLanguage, targetLanguage, dubbingMode
+        case translationMode, speakerMode, speakerVoiceMap, videoFileName, segments
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        duration = try values.decode(TimeInterval.self, forKey: .duration)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        sourceLanguage = try values.decode(String.self, forKey: .sourceLanguage)
+        targetLanguage = try values.decode(String.self, forKey: .targetLanguage)
+        dubbingMode = try values.decodeIfPresent(DubbingModePreset.self, forKey: .dubbingMode)
+        translationMode = try values.decodeIfPresent(TranslationMode.self, forKey: .translationMode)
+        speakerMode = try values.decodeIfPresent(SpeakerMode.self, forKey: .speakerMode) ?? .single
+        speakerVoiceMap = try values.decodeIfPresent([String: String].self, forKey: .speakerVoiceMap) ?? [:]
+        videoFileName = try values.decode(String.self, forKey: .videoFileName)
+        segments = try values.decode([TranslationSegment].self, forKey: .segments)
+    }
 
     var languagePair: String {
         "\(sourceLanguage.uppercased()) → \(targetLanguage.uppercased())"
@@ -91,6 +142,8 @@ actor LocalLibraryStore {
             targetLanguage: translation?.targetLanguage.isEmpty == false ? translation!.targetLanguage : "vi",
             dubbingMode: dubbingMode,
             translationMode: translation?.mode,
+            speakerMode: translation?.segments.contains(where: { $0.speakerID != nil || !$0.overlappingSpeakerIDs.isEmpty }) == true ? .multi : .single,
+            speakerVoiceMap: translation?.speakerVoiceMap ?? [:],
             videoFileName: destination.lastPathComponent,
             segments: translation?.segments ?? []
         )

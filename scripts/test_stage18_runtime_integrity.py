@@ -24,7 +24,7 @@ class Stage18RuntimeIntegrityTests(unittest.TestCase):
         self.assertIn("selectedMedia?.id == run.media.id", self.source)
 
     def test_begin_processing_uses_tracked_launcher(self) -> None:
-        body = self.function_body("    func beginProcessing() {", "    private struct ProcessingRun")
+        body = self.function_body("    func beginProcessing() {", "    struct ProcessingRun")
         self.assertIn("launchProcessing(", body)
         self.assertNotIn("Task {", body)
 
@@ -36,7 +36,7 @@ class Stage18RuntimeIntegrityTests(unittest.TestCase):
         self.assertIn("await cancelledProcessingTask?.value", home_body)
 
     def test_render_and_save_use_immutable_run_media(self) -> None:
-        body = self.function_body("    private func renderDubbedMedia(", "    private func translationEndpoint()")
+        body = self.function_body("    private func renderDubbedMedia(", "    func translationEndpoint()")
         self.assertIn("media: run.media", body)
         self.assertIn("translation: translation", body)
         self.assertIn("guard isActive(run) else", body)

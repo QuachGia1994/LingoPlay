@@ -27,6 +27,8 @@ data class ASRSegment(
     val startSeconds: Float,
     val endSeconds: Float,
     val text: String,
+    val speakerId: String? = null,
+    val overlappingSpeakerIds: List<String> = emptyList(),
 )
 
 data class ASRTranscript(
@@ -108,14 +110,23 @@ object InferenceMemoryPolicy {
     }
 }
 
+internal object SpeakerAwareASRPolicy {
+    private const val MULTI_SPEAKER_CHUNK_SECONDS = 6
+
+    fun chunkSeconds(defaultSeconds: Int, speakerMode: SpeakerMode): Int =
+        if (speakerMode == SpeakerMode.MULTI) min(defaultSeconds, MULTI_SPEAKER_CHUNK_SECONDS) else defaultSeconds
+}
+
 object SherpaWhisperSpeechRecognizer {
     suspend fun transcribe(
         context: Context,
         audioFile: File,
         model: SherpaWhisperModel,
         sourceLanguageCode: String? = null,
+        chunkSecondsOverride: Int? = null,
     ): ASRTranscript = withContext(Dispatchers.Default) {
         val budget = InferenceMemoryPolicy.forDevice(context)
+        val chunkSeconds = chunkSecondsOverride?.coerceIn(3, budget.chunkSeconds) ?: budget.chunkSeconds
         InferenceMemoryGate.reset()
         val whisper = OfflineWhisperModelConfig(
             encoder = model.encoder.absolutePath,
@@ -135,7 +146,7 @@ object SherpaWhisperSpeechRecognizer {
         val segments = mutableListOf<ASRSegment>()
         var language = "und"
         try {
-            AndroidAudioDecoder.forEachChunk(audioFile, budget.chunkSeconds) { chunk ->
+            AndroidAudioDecoder.forEachChunk(audioFile, chunkSeconds) { chunk ->
                 InferenceMemoryGate.throwIfTrimRequested()
                 if (!ASRAudioGate.hasLikelySpeech(chunk.samples)) return@forEachChunk
                 val stream = recognizer.createStream()
@@ -199,18 +210,43 @@ object ASRFormatting {
         if (text.isEmpty()) return@mapNotNull null
         val start = segment.startSeconds.coerceAtLeast(0f)
         val end = segment.endSeconds.coerceAtLeast(start)
-        ASRSegment(segment.id, start, end, text)
+        segment.copy(startSeconds = start, endSeconds = end, text = text)
     }
 }
 
-private data class DecodedAudioChunk(
+internal data class DecodedAudioChunk(
     val samples: FloatArray,
     val sampleRate: Int,
     val startSeconds: Float,
     val endSeconds: Float,
 )
 
-private object AndroidAudioDecoder {
+internal object AndroidAudioDecoder {
+    suspend fun decodeResampledMono(
+        file: File,
+        targetSampleRate: Int,
+        maxDurationSeconds: Int,
+    ): FloatArray {
+        require(targetSampleRate > 0 && maxDurationSeconds > 0)
+        val maximumSamples = targetSampleRate.toLong() * maxDurationSeconds.toLong()
+        val output = FloatAccumulator(minOf(maximumSamples, targetSampleRate.toLong() * 30L).toInt().coerceAtLeast(1))
+        forEachChunk(file, 20) { chunk ->
+            val ratio = chunk.sampleRate.toDouble() / targetSampleRate.toDouble()
+            val outputCount = max(1, (chunk.samples.size.toDouble() / ratio).toInt())
+            check(output.size.toLong() + outputCount.toLong() <= maximumSamples) {
+                "Multi-speaker analysis supports up to ${maxDurationSeconds / 60} minutes per video on this device."
+            }
+            repeat(outputCount) { index ->
+                val sourcePosition = index.toDouble() * ratio
+                val left = sourcePosition.toInt().coerceIn(0, chunk.samples.lastIndex)
+                val right = minOf(left + 1, chunk.samples.lastIndex)
+                val fraction = (sourcePosition - left.toDouble()).toFloat()
+                output.add(chunk.samples[left] + (chunk.samples[right] - chunk.samples[left]) * fraction)
+            }
+        }
+        return output.toArray()
+    }
+
     suspend fun forEachChunk(file: File, chunkSeconds: Int, consume: (DecodedAudioChunk) -> Unit) = withContext(Dispatchers.IO) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -307,6 +343,19 @@ private object AndroidAudioDecoder {
             output.add(sum / channelCount)
         }
     }
+}
+
+private class FloatAccumulator(initialCapacity: Int) {
+    private var values = FloatArray(initialCapacity.coerceAtLeast(1))
+    var size: Int = 0
+        private set
+
+    fun add(value: Float) {
+        if (size == values.size) values = values.copyOf((values.size * 2).coerceAtLeast(1))
+        values[size++] = value
+    }
+
+    fun toArray(): FloatArray = values.copyOf(size)
 }
 
 internal object ASRChunkBoundaryPolicy {

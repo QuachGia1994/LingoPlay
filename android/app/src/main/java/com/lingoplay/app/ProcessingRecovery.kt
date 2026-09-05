@@ -103,6 +103,11 @@ object ProcessingCheckpointStore {
             put("dubbingMode", record.dubbingMode)
             put("subtitleMode", record.subtitleMode)
             put("translationMode", record.translationMode)
+            put("speakerMode", record.speakerMode)
+            put("voiceCloningEnabled", record.voiceCloningEnabled)
+            put("speakerVoiceMap", JSONObject().apply {
+                record.speakerVoiceMap.forEach { (speakerId, voiceId) -> put(speakerId, voiceId) }
+            })
         }
     }
 
@@ -113,6 +118,15 @@ object ProcessingCheckpointStore {
         dubbingMode = json.getString("dubbingMode"),
         subtitleMode = json.optString("subtitleMode", SubtitleMode.BILINGUAL.name),
         translationMode = json.optString("translationMode", TranslationMode.CLOUD.name),
+        speakerMode = json.optString("speakerMode", SpeakerMode.SINGLE.name),
+        speakerVoiceMap = json.optJSONObject("speakerVoiceMap")?.let { mapJson ->
+            buildMap {
+                mapJson.keys().forEach { key ->
+                    mapJson.optString(key).takeIf(String::isNotBlank)?.let { put(key, it) }
+                }
+            }
+        }.orEmpty(),
+        voiceCloningEnabled = json.optBoolean("voiceCloningEnabled", false),
     ).toConfig()
 
     private fun checkpointFile(context: Context): File = File(File(context.filesDir, ROOT), FILE_NAME)
