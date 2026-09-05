@@ -52,6 +52,7 @@ internal sealed interface ProcessingOutcome {
 
 internal interface AndroidProcessingRuntime {
     suspend fun extractAudio(media: LocalMediaItem): File
+    suspend fun audioTimelineOffsetMs(media: LocalMediaItem): Int = 0
     fun findWhisperModel(): SherpaWhisperModel?
     suspend fun transcribe(
         audioFile: File,
@@ -112,6 +113,13 @@ internal interface AndroidProcessingRuntime {
 internal class DefaultAndroidProcessingRuntime(private val context: Context) : AndroidProcessingRuntime {
     override suspend fun extractAudio(media: LocalMediaItem): File =
         LocalMediaRepository.extractAudio(context, media)
+
+    override suspend fun audioTimelineOffsetMs(media: LocalMediaItem): Int =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            (LocalMediaRepository.audioStartUs(context, media.uri) / 1_000L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+        }
 
     override fun findWhisperModel(): SherpaWhisperModel? = ASRModelStore.findWhisperModel(context)
 
@@ -247,6 +255,7 @@ internal class AndroidProcessingCoordinator(
         return try {
             val audioFile = prepareAudio(media, reusableAudio, config, onEvent)
                 ?: return ProcessingOutcome.Failed(ProcessingFailureStep.AUDIO, "Audio preparation failed.")
+            val timelineOffsetMs = audioTimelineOffsetMs(media)
             val sources = if (config.cleanBackgroundEnabled) {
                 if (!runtime.sourceSeparationAvailable()) return ProcessingOutcome.SourceSeparationModelMissing
                 val stems = separateAudio(audioFile)
@@ -285,7 +294,8 @@ internal class AndroidProcessingCoordinator(
             if (resolvedConfig.translationMode == TranslationMode.CLOUD && !translationConfigured) {
                 return ProcessingOutcome.TranslationEndpointMissing
             }
-            val translation = translate(annotatedTranscript, resolvedConfig, onEvent)
+            val timelineTranscript = ASRTimelinePolicy.shifted(annotatedTranscript, timelineOffsetMs)
+            val translation = translate(timelineTranscript, resolvedConfig, onEvent)
                 ?.copy(speakerVoiceMap = resolvedConfig.speakerVoiceMap)
                 ?: return ProcessingOutcome.Failed(ProcessingFailureStep.TRANSLATION, "Translation failed.")
 
@@ -357,6 +367,19 @@ internal class AndroidProcessingCoordinator(
             runtime.record("audio_preparation_failed")
             throw ProcessingStepException(ProcessingFailureStep.AUDIO, error.message ?: "Audio preparation failed.", error)
         }
+    }
+
+    private suspend fun audioTimelineOffsetMs(media: LocalMediaItem): Int = try {
+        runtime.audioTimelineOffsetMs(media).coerceAtLeast(0)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        runtime.record("audio_timeline_failed")
+        throw ProcessingStepException(
+            ProcessingFailureStep.AUDIO,
+            error.message ?: "Source audio timeline could not be read.",
+            error,
+        )
     }
 
     private fun findWhisperModel(): SherpaWhisperModel? = try {

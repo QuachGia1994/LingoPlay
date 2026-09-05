@@ -64,6 +64,34 @@ class SourceSeparationPolicyTest {
     }
 
     @Test
+    fun exactTenTwentySecondAndSubSecondInputsCoverEveryCoreFrameOnce() {
+        fun chunksFor(frameCount: Int): List<StereoAudioChunk> {
+            val accumulator = StereoContextChunkAccumulator(sampleRate = 100, coreSeconds = 10, contextMilliseconds = 500)
+            val chunks = mutableListOf<StereoAudioChunk>()
+            repeat(frameCount) { frame ->
+                accumulator.add(frame.toFloat(), -frame.toFloat())?.let(chunks::add)
+            }
+            chunks += accumulator.flush()
+            return chunks
+        }
+
+        val tenSeconds = chunksFor(1_000)
+        assertEquals(listOf(0L), tenSeconds.map { it.coreStartFrame })
+        assertEquals(listOf(1_000), tenSeconds.map { it.coreFrames })
+        assertEquals(1_000, tenSeconds.sumOf { it.coreFrames })
+
+        val twentySeconds = chunksFor(2_000)
+        assertEquals(listOf(0L, 1_000L), twentySeconds.map { it.coreStartFrame })
+        assertEquals(listOf(1_000, 1_000), twentySeconds.map { it.coreFrames })
+        assertEquals(2_000, twentySeconds.sumOf { it.coreFrames })
+
+        val subSecond = chunksFor(75)
+        assertEquals(listOf(0L), subSecond.map { it.coreStartFrame })
+        assertEquals(listOf(75), subSecond.map { it.coreFrames })
+        assertEquals(75, subSecond.sumOf { it.coreFrames })
+    }
+
+    @Test
     fun contextualChunkingCoversEachCoreFrameOnceWithGuardContext() {
         val accumulator = StereoContextChunkAccumulator(sampleRate = 10, coreSeconds = 4, contextMilliseconds = 500)
         val chunks = mutableListOf<StereoAudioChunk>()

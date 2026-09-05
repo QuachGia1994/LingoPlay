@@ -245,15 +245,15 @@ final class OfflineTranslationService {
         for (index, source) in sourceSegments.enumerated() {
             try Task.checkCancellation()
             let text = try await translate(source.text, using: translator)
-            let cleaned = TranslationTextPolicy.speechText(text)
-            guard !cleaned.isEmpty else { throw OfflineTranslationError.emptyResponse }
+            let displayText = TranslationTextPolicy.displayText(text)
+            guard !TranslationTextPolicy.speechText(displayText).isEmpty else { throw OfflineTranslationError.emptyResponse }
             translated.append(
                 TranslationSegment(
                     id: source.id,
                     startMs: source.startMs,
                     endMs: source.endMs,
                     sourceText: source.text,
-                    translatedText: cleaned,
+                    translatedText: displayText,
                     speakerID: source.speakerID,
                     overlappingSpeakerIDs: source.overlappingSpeakerIDs
                 )

@@ -105,6 +105,19 @@ actor LocalMediaService {
     }
 }
 
+enum MediaTimelinePolicy {
+    static func audioStartOffsetSeconds(for sourceURL: URL) async throws -> TimeInterval {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+            throw LocalMediaError.noAudioTrack
+        }
+        let range = try await audioTrack.load(.timeRange)
+        let seconds = range.start.seconds
+        guard seconds.isFinite else { return 0 }
+        return max(0, seconds)
+    }
+}
+
 enum MediaFormatting {
     static func duration(seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "00:00" }

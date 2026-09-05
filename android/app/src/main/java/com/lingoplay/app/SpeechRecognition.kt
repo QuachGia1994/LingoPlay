@@ -204,6 +204,21 @@ internal object ASRAudioGate {
     }
 }
 
+internal object ASRTimelinePolicy {
+    fun shifted(transcript: ASRTranscript, offsetMs: Int): ASRTranscript {
+        if (offsetMs <= 0) return transcript
+        val offsetSeconds = offsetMs.toFloat() / 1_000f
+        return transcript.copy(
+            segments = transcript.segments.map { segment ->
+                segment.copy(
+                    startSeconds = segment.startSeconds + offsetSeconds,
+                    endSeconds = segment.endSeconds + offsetSeconds,
+                )
+            },
+        )
+    }
+}
+
 object ASRFormatting {
     fun normalizedText(text: String): String = text.trim().split(Regex("\\s+")).filter(String::isNotEmpty).joinToString(" ")
 

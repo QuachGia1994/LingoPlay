@@ -397,7 +397,7 @@ actor VoiceCloningTTSService {
                 extra: ["min_char_in_sentence": "10"]
             )
             let audio = tts.generateWithConfig(
-                text: segment.translatedText,
+                text: segment.spokenText,
                 config: generation,
                 callback: nil,
                 arg: nil
@@ -411,7 +411,7 @@ actor VoiceCloningTTSService {
             else {
                 throw TTSError.synthesisFailed("Voice Cloning could not save segment \(segment.id).")
             }
-            let durationMs = max(1, Int((Double(audio.n) * 1_000 / Double(audio.sampleRate)).rounded()))
+            let durationMs = try SynthesizedAudioPolicy.durationMs(of: fileURL)
             let fits = DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs)
             let next = DurationFitPolicy.nextRateMultiplier(
                 actualMs: durationMs,

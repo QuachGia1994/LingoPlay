@@ -34,6 +34,10 @@ enum TranslationTextPolicy {
         "me", "of", "please", "that", "the", "this", "to", "we", "what", "you",
     ]
 
+    static func displayText(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
     static func speechText(_ text: String) -> String {
         let withoutAngles = text.replacingOccurrences(
             of: "<[^>\\r\\n]{1,96}>",
@@ -45,10 +49,7 @@ enum TranslationTextPolicy {
             with: " ",
             options: .regularExpression
         )
-        return withoutCues
-            .split(whereSeparator: { $0.isWhitespace })
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return displayText(withoutCues)
     }
 
     static func sourceLanguage(reported: String, text: String) -> String {
@@ -112,6 +113,9 @@ struct TranslationSegment: Identifiable, Sendable, Equatable, Codable {
     let speakerID: String?
     let overlappingSpeakerIDs: [String]
 
+    var displayText: String { TranslationTextPolicy.displayText(translatedText) }
+    var spokenText: String { TranslationTextPolicy.speechText(translatedText) }
+
     init(
         id: String,
         startMs: Int,
@@ -168,7 +172,7 @@ struct TranslationDocument: Sendable, Equatable {
     }
 
     var translatedText: String {
-        segments.map(\.translatedText).joined(separator: " ")
+        segments.map(\.displayText).joined(separator: " ")
     }
 }
 
@@ -286,8 +290,8 @@ struct TranslationService: Sendable {
         }
 
         let translated = try sourceSegments.map { source -> TranslationSegment in
-            let translatedText = TranslationTextPolicy.speechText(translatedByID[source.id] ?? "")
-            guard !translatedText.isEmpty else {
+            let displayText = TranslationTextPolicy.displayText(translatedByID[source.id] ?? "")
+            guard !TranslationTextPolicy.speechText(displayText).isEmpty else {
                 throw TranslationError.invalidResponse
             }
             return TranslationSegment(
@@ -295,7 +299,7 @@ struct TranslationService: Sendable {
                 startMs: source.startMs,
                 endMs: source.endMs,
                 sourceText: source.text,
-                translatedText: translatedText,
+                translatedText: displayText,
                 speakerID: source.speakerID,
                 overlappingSpeakerIDs: source.overlappingSpeakerIDs
             )

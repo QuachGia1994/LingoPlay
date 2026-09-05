@@ -89,7 +89,7 @@ actor NeuralVietnameseTTSService {
             try Task.checkCancellation()
             let fileURL = root.appendingPathComponent("\(segment.id)-\(attempt).wav")
             try? FileManager.default.removeItem(at: fileURL)
-            let audio = tts.generate(text: segment.translatedText, sid: 0, speed: multiplier)
+            let audio = tts.generate(text: segment.spokenText, sid: 0, speed: multiplier)
             try Task.checkCancellation()
             guard audio.audio != nil, audio.n > 0, audio.sampleRate > 0 else {
                 throw TTSError.synthesisFailed("Neural Voice produced no audio for segment \(segment.id).")
@@ -100,10 +100,7 @@ actor NeuralVietnameseTTSService {
                 throw TTSError.synthesisFailed("Neural Voice could not save segment \(segment.id).")
             }
 
-            let durationMs = max(
-                1,
-                Int((Double(audio.n) * 1_000 / Double(audio.sampleRate)).rounded())
-            )
+            let durationMs = try SynthesizedAudioPolicy.durationMs(of: fileURL)
             let fits = DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs)
             let next = DurationFitPolicy.nextRateMultiplier(
                 actualMs: durationMs,

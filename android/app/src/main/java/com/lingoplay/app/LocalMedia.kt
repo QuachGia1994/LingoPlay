@@ -94,6 +94,19 @@ object LocalMediaRepository {
         destination
     }
 
+    internal fun audioStartUs(context: Context, uri: Uri): Long {
+        val extractor = openExtractor(context, uri)
+        return try {
+            val audioTrackIndex = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: throw LocalMediaException.NoAudioTrack
+            extractor.selectTrack(audioTrackIndex)
+            extractor.sampleTime.coerceAtLeast(0L)
+        } finally {
+            extractor.release()
+        }
+    }
+
     private fun queryMetadata(context: Context, uri: Uri): Pair<String?, Long?> {
         if (uri.scheme == "file") {
             val file = uri.path?.let(::File) ?: return null to null

@@ -86,6 +86,15 @@ enum DurationFitPolicy {
     }
 }
 
+enum SynthesizedAudioPolicy {
+    static func durationMs(of url: URL) throws -> Int {
+        let file = try AVAudioFile(forReading: url)
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate > 0, file.length > 0 else { throw TTSError.invalidAudio }
+        return max(1, Int((Double(file.length) / sampleRate * 1_000).rounded()))
+    }
+}
+
 enum SystemVoiceRatePolicy {
     static func baseRateScale(languageCode: String) -> Float {
         normalized(languageCode) == "vi" ? 0.82 : 1.0
@@ -188,18 +197,19 @@ final class SystemVietnameseTTSService {
         for attempt in 0..<DurationFitPolicy.maximumAttempts {
             let fileURL = root.appendingPathComponent("\(segment.id)-\(attempt).caf")
             try? FileManager.default.removeItem(at: fileURL)
+            let spokenText = segment.spokenText
             try await synthesizeOnce(
-                text: segment.translatedText,
+                text: spokenText,
                 voice: voice,
                 multiplier: multiplier,
                 to: fileURL,
                 synthesizer: synthesizer,
                 timeoutNanoseconds: TTSSynthesisLivenessPolicy.timeoutNanoseconds(
-                    textLength: segment.translatedText.count,
+                    textLength: spokenText.count,
                     targetDurationMs: targetMs
                 )
             )
-            let durationMs = try measuredDurationMs(of: fileURL)
+            let durationMs = try SynthesizedAudioPolicy.durationMs(of: fileURL)
 
             let fits = DurationFitPolicy.fits(actualMs: durationMs, targetMs: targetMs)
             let next = DurationFitPolicy.nextRateMultiplier(
@@ -290,12 +300,6 @@ final class SystemVietnameseTTSService {
         )
     }
 
-    private func measuredDurationMs(of url: URL) throws -> Int {
-        let file = try AVAudioFile(forReading: url)
-        let sampleRate = file.processingFormat.sampleRate
-        guard sampleRate > 0, file.length > 0 else { throw TTSError.invalidAudio }
-        return max(1, Int((Double(file.length) / sampleRate * 1_000).rounded()))
-    }
 }
 
 private final class SpeechBufferFileWriter: @unchecked Sendable {

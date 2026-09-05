@@ -26,7 +26,10 @@ data class TranslationSegment(
     val translatedText: String,
     val speakerId: String? = null,
     val overlappingSpeakerIds: List<String> = emptyList(),
-)
+) {
+    val displayText: String get() = TranslationTextPolicy.displayText(translatedText)
+    val spokenText: String get() = TranslationTextPolicy.speechText(translatedText)
+}
 
 data class TranslationDocument(
     val sourceLanguage: String,
@@ -35,7 +38,7 @@ data class TranslationDocument(
     val mode: TranslationMode = TranslationMode.CLOUD,
     val speakerVoiceMap: Map<String, String> = emptyMap(),
 ) {
-    val translatedText: String get() = segments.joinToString(" ") { it.translatedText }
+    val translatedText: String get() = segments.joinToString(" ") { it.displayText }
 }
 
 enum class TranslationPhase {
@@ -56,11 +59,11 @@ object TranslationTextPolicy {
         "me", "of", "please", "that", "the", "this", "to", "we", "what", "you",
     )
 
-    fun speechText(text: String): String = text
-        .replace(controlTag, " ")
-        .replace(bracketCue, " ")
-        .trim()
-        .replace(whitespace, " ")
+    fun displayText(text: String): String = text.trim().replace(whitespace, " ")
+
+    fun speechText(text: String): String = displayText(
+        text.replace(controlTag, " ").replace(bracketCue, " "),
+    )
 
     fun sourceLanguage(reported: String, text: String): String {
         val cleaned = speechText(text)
@@ -170,14 +173,16 @@ object TranslationService {
         }
 
         val translatedSegments = sourceSegments.map { source ->
-            val text = TranslationTextPolicy.speechText(translatedById[source.id].orEmpty())
-            check(text.isNotEmpty()) { "Translation backend returned an incomplete response." }
+            val displayText = TranslationTextPolicy.displayText(translatedById[source.id].orEmpty())
+            check(TranslationTextPolicy.speechText(displayText).isNotEmpty()) {
+                "Translation backend returned an incomplete response."
+            }
             TranslationSegment(
                 source.id,
                 source.startMs,
                 source.endMs,
                 source.text,
-                text,
+                displayText,
                 source.speakerId,
                 source.overlappingSpeakerIds,
             )

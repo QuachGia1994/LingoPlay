@@ -56,7 +56,7 @@ struct PlayerView: View {
                         EmptyView()
                     case .translated:
                         VStack(alignment: .leading, spacing: 12) {
-                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
+                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.displayText ?? "—")
                             if model.activeTranslationUsesGoogle {
                                 Text("Powered by Google Translate")
                                     .font(.caption2)
@@ -68,7 +68,7 @@ struct PlayerView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SubtitleLine(language: model.activeSubtitleSourceLanguage, text: model.activeTranslationSegment?.sourceText ?? "—")
                             Divider().overlay(LPTheme.border)
-                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.translatedText ?? "—")
+                            SubtitleLine(language: model.activeSubtitleTargetLanguage, text: model.activeTranslationSegment?.displayText ?? "—")
                             if model.activeTranslationUsesGoogle {
                                 Text("Powered by Google Translate")
                                     .font(.caption2)

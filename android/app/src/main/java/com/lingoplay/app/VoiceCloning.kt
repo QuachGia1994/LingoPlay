@@ -479,11 +479,11 @@ object VoiceCloningTTSService {
                 numSteps = 4,
                 extra = mapOf("min_char_in_sentence" to "10"),
             )
-            val audio = tts.generateWithConfig(segment.translatedText, config)
+            val audio = tts.generateWithConfig(segment.spokenText, config)
             currentCoroutineContext().ensureActive()
             check(audio.samples.isNotEmpty() && audio.sampleRate > 0) { "Voice Cloning produced no audio for ${segment.id}." }
             check(audio.save(output.absolutePath) && output.length() > 44L) { "Voice Cloning could not save ${segment.id}." }
-            val durationMs = max(1, (audio.samples.size.toDouble() * 1_000.0 / audio.sampleRate.toDouble()).roundToInt())
+            val durationMs = PcmWaveFile.durationMs(output)
             val next = DurationFitPolicy.nextRateMultiplier(durationMs, targetMs, multiplier)
             val fits = DurationFitPolicy.fits(durationMs, targetMs)
             if (fits || next == null || attempt == DurationFitPolicy.MAXIMUM_ATTEMPTS - 1) {

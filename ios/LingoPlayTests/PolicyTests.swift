@@ -113,6 +113,30 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(DubbingPreferencePolicy.sanitizedPlaybackSpeed(nil), 1.0)
     }
 
+    func testASRTimelineOffsetRestoresDelayedSourceStartAfterZeroBasedAnalysis() {
+        let transcript = ASRTranscript(
+            language: "en",
+            text: "hello world",
+            segments: [
+                ASRSegment(id: 0, start: 0.1, end: 0.6, text: "hello", speakerID: "speaker_1"),
+                ASRSegment(
+                    id: 1,
+                    start: 0.7,
+                    end: 1.2,
+                    text: "world",
+                    overlappingSpeakerIDs: ["speaker_1", "speaker_2"]
+                ),
+            ]
+        )
+        let shifted = ASRTimelinePolicy.shifted(transcript, offsetSeconds: 0.5)
+        XCTAssertEqual(shifted.segments[0].start, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(shifted.segments[0].end, 1.1, accuracy: 0.0001)
+        XCTAssertEqual(shifted.segments[0].speakerID, "speaker_1")
+        XCTAssertEqual(shifted.segments[1].start, 1.2, accuracy: 0.0001)
+        XCTAssertEqual(shifted.segments[1].overlappingSpeakerIDs, ["speaker_1", "speaker_2"])
+        XCTAssertEqual(ASRTimelinePolicy.shifted(transcript, offsetSeconds: 0), transcript)
+    }
+
     func testSavedSubtitleDocumentControlsLabelsAndEndBoundary() {
         let segment = TranslationSegment(
             id: "s1",

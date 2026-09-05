@@ -125,6 +125,26 @@ actor WhisperKitSpeechRecognizer: OnDeviceSpeechRecognizer {
     }
 }
 
+enum ASRTimelinePolicy {
+    static func shifted(_ transcript: ASRTranscript, offsetSeconds: TimeInterval) -> ASRTranscript {
+        guard offsetSeconds.isFinite, offsetSeconds > 0 else { return transcript }
+        return ASRTranscript(
+            language: transcript.language,
+            text: transcript.text,
+            segments: transcript.segments.map { segment in
+                ASRSegment(
+                    id: segment.id,
+                    start: segment.start + offsetSeconds,
+                    end: segment.end + offsetSeconds,
+                    text: segment.text,
+                    speakerID: segment.speakerID,
+                    overlappingSpeakerIDs: segment.overlappingSpeakerIDs
+                )
+            }
+        )
+    }
+}
+
 enum ASRFormatting {
     static func normalizedText(_ text: String) -> String {
         text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)

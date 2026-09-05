@@ -73,6 +73,34 @@ enum TimelineMixError: LocalizedError {
     }
 }
 
+enum SpeechSeamPolicy {
+    static let edgeFadeSecondsMaximum: TimeInterval = 0.008
+
+    static func edgeFadeSeconds(clipDuration: TimeInterval) -> TimeInterval {
+        guard clipDuration.isFinite, clipDuration > 0 else { return 0 }
+        return min(edgeFadeSecondsMaximum, clipDuration / 2)
+    }
+
+    static func apply(to parameters: AVMutableAudioMixInputParameters, interval: CMTimeRange) {
+        let fadeSeconds = edgeFadeSeconds(clipDuration: interval.duration.seconds)
+        guard fadeSeconds > 0 else { return }
+        let fade = CMTime(seconds: fadeSeconds, preferredTimescale: 60_000)
+        let end = CMTimeRangeGetEnd(interval)
+        let fadeOutStart = CMTimeSubtract(end, fade)
+        parameters.setVolume(0, at: interval.start)
+        parameters.setVolumeRamp(
+            fromStartVolume: 0,
+            toEndVolume: 1,
+            timeRange: CMTimeRange(start: interval.start, duration: fade)
+        )
+        parameters.setVolumeRamp(
+            fromStartVolume: 1,
+            toEndVolume: 0,
+            timeRange: CMTimeRange(start: fadeOutStart, duration: fade)
+        )
+    }
+}
+
 @MainActor
 final class TimelineMixService {
     private let cacheMaxAge: TimeInterval = 24 * 60 * 60
@@ -244,6 +272,7 @@ final class TimelineMixService {
     ) async throws {
         let composition = AVMutableComposition()
         var lanes: [(track: AVMutableCompositionTrack, end: CMTime)] = []
+        var intervalsByLane: [ObjectIdentifier: [CMTimeRange]] = [:]
 
         for segment in segments.sorted(by: { lhs, rhs in
             lhs.startMs == rhs.startMs ? lhs.endMs < rhs.endMs : lhs.startMs < rhs.startMs
@@ -274,6 +303,8 @@ final class TimelineMixService {
             }
 
             try lane.insertTimeRange(range, of: sourceTrack, at: start)
+            let insertedRange = CMTimeRange(start: start, duration: clipDuration)
+            intervalsByLane[ObjectIdentifier(lane), default: []].append(insertedRange)
             let end = CMTimeAdd(start, clipDuration)
             if let index = lanes.firstIndex(where: { $0.track === lane }) {
                 lanes[index].end = CMTimeMaximum(lanes[index].end, end)
@@ -294,6 +325,9 @@ final class TimelineMixService {
         laneMix.inputParameters = lanes.map { lane in
             let parameters = AVMutableAudioMixInputParameters(track: lane.track)
             parameters.setVolume(1, at: .zero)
+            intervalsByLane[ObjectIdentifier(lane.track), default: []].forEach { interval in
+                SpeechSeamPolicy.apply(to: parameters, interval: interval)
+            }
             return parameters
         }
         exporter.audioMix = laneMix

@@ -7,6 +7,8 @@ import android.net.Uri
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -198,6 +200,114 @@ class TimelineMixDeviceSmokeTest {
         } finally {
             rendered?.parentFile?.deleteRecursively()
             root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun stage22VideoPresentationTimestampsSurviveFractionalAndVariableFrameRateRemux() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val target = instrumentation.targetContext
+        val assets = instrumentation.context.assets
+        val root = File(target.cacheDir, "stage22-video-pts").apply { deleteRecursively(); mkdirs() }
+        try {
+            val dubClip = copyAsset("stage6-dub-1.wav", File(root, "dub.wav"), assets)
+            val fixtures = listOf(
+                "stage22-23976.mp4",
+                "stage22-2997.mp4",
+                "stage22-vfr.mp4",
+                "stage22-subsecond.mp4",
+            )
+            fixtures.forEach { name ->
+                val source = copyAsset(name, File(root, name), assets)
+                val durationMs = mediaDurationMs(source)
+                val audioFormat = firstAudioFormat(source)
+                assertEquals("$name must stay 48 kHz", 48_000, audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE))
+                assertEquals("$name must stay mono", 1, audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
+                val media = LocalMediaItem(Uri.fromFile(source), name, durationMs, source.length(), true)
+                val dub = DubSpeechDocument(
+                    "stage22-fixture",
+                    listOf(DubSpeechSegment("d", 100, 650, dubClip, 550, 0, 1f)),
+                )
+                val rendered = TimelineMixService.render(target, media, dub)
+                try {
+                    assertEquals(
+                        "$name video PTS changed during passthrough remux",
+                        videoPresentationTimesUs(source),
+                        videoPresentationTimesUs(rendered.remuxedVideoFile),
+                    )
+                } finally {
+                    rendered.remuxedVideoFile.parentFile?.deleteRecursively()
+                }
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun stage22DelayedAudioStartAndNoAudioFailClosedAreObservableOnDevice() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val target = instrumentation.targetContext
+        val assets = instrumentation.context.assets
+        val root = File(target.cacheDir, "stage22-audio-timeline").apply { deleteRecursively(); mkdirs() }
+        try {
+            val delayed = copyAsset("stage22-shifted-audio.mp4", File(root, "delayed.mp4"), assets)
+            val delayedStartUs = LocalMediaRepository.audioStartUs(target, Uri.fromFile(delayed))
+            assertTrue("Fixture must have a real delayed audio PTS, got $delayedStartUs", delayedStartUs in 450_000L..550_000L)
+
+            val noAudio = copyAsset("stage22-no-audio.mp4", File(root, "no-audio.mp4"), assets)
+            val inspected = LocalMediaRepository.inspect(target, Uri.fromFile(noAudio))
+            assertFalse("No-audio fixture was misdetected as having audio", inspected.hasAudioTrack)
+            try {
+                LocalMediaRepository.extractAudio(target, inspected)
+                throw AssertionError("No-audio video must fail closed instead of fabricating an audio track")
+            } catch (_: LocalMediaException.NoAudioTrack) {
+                // Expected media-fidelity contract.
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private fun mediaDurationMs(file: File): Long {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun firstAudioFormat(file: File): MediaFormat {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.absolutePath)
+            val index = (0 until extractor.trackCount).first { track ->
+                extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            }
+            extractor.getTrackFormat(index)
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun videoPresentationTimesUs(file: File): List<Long> {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.absolutePath)
+            val index = (0 until extractor.trackCount).first { track ->
+                extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+            }
+            extractor.selectTrack(index)
+            buildList {
+                while (extractor.sampleTime >= 0L) {
+                    add(extractor.sampleTime)
+                    if (!extractor.advance()) break
+                }
+            }
+        } finally {
+            extractor.release()
         }
     }
 

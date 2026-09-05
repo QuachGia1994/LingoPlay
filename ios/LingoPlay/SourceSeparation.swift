@@ -251,7 +251,7 @@ private final class LingoSourceSeparator {
     }
 }
 
-private struct StereoFloatChunk: Sendable {
+struct StereoFloatChunk: Sendable {
     let planarStereo: [Float]
     let frames: Int
     let sampleRate: Int
@@ -260,7 +260,7 @@ private struct StereoFloatChunk: Sendable {
     let coreFrames: Int
 }
 
-private final class StereoFloatChunkReader {
+final class StereoFloatChunkReader {
     private let file: AVAudioFile
     private let format: AVAudioFormat
     private let coreFrames: Int64

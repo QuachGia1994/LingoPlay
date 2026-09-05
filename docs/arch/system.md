@@ -1,6 +1,6 @@
 # System architecture
 
-> updated 2026-09-05 · Stage 22 runtime-integrity audit
+> updated 2026-09-05 · 578c86b
 
 ## Goal
 Keep the heavy media path local while exposing a small server boundary for translation/provider access and entitlement state.
@@ -183,5 +183,14 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Source-separation session directories are transient across process death as well as normal success/failure/cancel: startup purges stale separated-audio cache directories on both platforms. TTS session cleanup remains independently enforced.
 - Resume continues from the checkpoint's immutable processing snapshot and only revalidates current cloning consent; Settings changes after the original run began do not silently rewrite the recovered run.
 
+## Stage 22.2 media-fidelity boundary
+- Source audio may start after video time zero. ASR, diarization and cloning-reference extraction intentionally analyze zero-based prepared PCM together; only after those local analysis/reference steps finish is the original audio-track start offset restored once before translation, subtitle timing and TTS placement. This keeps clone-reference seeking correct while aligning user-visible/dubbed speech to the authored asset timeline.
+- Video cadence is not normalized. Android final remux copies source video sample presentation timestamps; iOS uses AVFoundation composition/passthrough with the source transform. Generated fixtures cover 24000/1001, 30000/1001, true variable frame durations, sub-second media and explicit no-audio failure.
+- `TranslationSegment.translatedText` remains the persistence/wire key for backward compatibility, while `displayText` is the human-facing normalized form and `spokenText` removes bounded control tags/non-speech cues. Subtitles and Library persistence use display semantics; system, neural VAIS1000 and ZipVoice synthesis use spoken semantics.
+- Synthesized clip duration is authoritative only after persistence. Android parses the saved WAV once through shared `PcmWaveFile` metadata and derives duration from PCM frames; iOS derives it from saved `AVAudioFile.length / sampleRate`. In-memory provider sample counts no longer decide duration fitting for neural/cloned output.
+- Speech clips receive an 8 ms edge fade without moving or resizing their timeline windows. Android applies the fade after normalization/resampling when speech PCM is loaded for mixing; iOS applies equivalent per-clip AVAudioMix ramps while rendering the dub timeline. TTS tails beyond source-video duration remain preserved by the existing extended-output policy.
+- Exact 10-second, 20-second and sub-second Clean Background fixtures guard core-frame coverage. Clean Background + multi-speaker + cloning continues to route vocals to ASR/diarization/reference extraction and accompaniment only to the final background mix.
+- Physical Meizu/iPhone media-fidelity execution and macOS XCTest/Release CI are intentionally deferred from this source batch and must not be inferred from local Windows compile/static evidence.
+
 ## Current stage
-Stage 21 account-independent engineering is complete on `c216daa`; Android CI `33966665215` and iOS CI `33966665140` are green. Stage 22 final zero-trust audit is active: 22.1 Runtime Integrity is under source/unit/device verification, followed by 22.2 Media Fidelity, 22.3 Model Supply Chain, 22.4 Security & Privacy, and 22.5 Device Stress/Accessibility. Stage 22.6 Store & Release Certification remains externally blocked by Apple Developer/App Store Connect and Google Play Console accounts plus deferred physical iPhone evidence.
+Stage 21 account-independent engineering is complete on `c216daa`; Android CI `33966665215` and iOS CI `33966665140` are green. Stage 22.1 Runtime Integrity landed at `578c86b`. Stage 22.2 Media Fidelity source implementation and local Android unit/instrumentation-compile gates are complete in the current working tree; physical Meizu/iPhone execution and macOS iOS CI remain deferred. Stage 22.3 Model Supply Chain, 22.4 Security & Privacy and 22.5 Device Stress/Accessibility have not been started by this batch. Stage 22.6 Store & Release Certification remains externally blocked by Apple Developer/App Store Connect and Google Play Console accounts plus deferred physical iPhone evidence.

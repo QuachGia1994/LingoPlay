@@ -16,6 +16,20 @@ class TranslationBatchingTest {
     }
 
     @Test
+    fun `display text preserves cues while spoken text removes them`() {
+        val segment = TranslationSegment(
+            id = "s0",
+            startMs = 0,
+            endMs = 1_000,
+            sourceText = "hello",
+            translatedText = "  Xin chào   [cười]   thế giới  ",
+        )
+
+        assertEquals("Xin chào [cười] thế giới", segment.displayText)
+        assertEquals("Xin chào thế giới", segment.spokenText)
+    }
+
+    @Test
     fun `strong English evidence corrects wrong Thai auto detection`() {
         val language = TranslationTextPolicy.sourceLanguage(
             reported = "th",

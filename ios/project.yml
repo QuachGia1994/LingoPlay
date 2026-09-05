@@ -65,6 +65,18 @@ targets:
         buildPhase: resources
       - path: ../android/app/src/androidTest/assets/stage6-dub-1.wav
         buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-23976.mp4
+        buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-2997.mp4
+        buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-vfr.mp4
+        buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-shifted-audio.mp4
+        buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-subsecond.mp4
+        buildPhase: resources
+      - path: ../android/app/src/androidTest/assets/stage22-no-audio.mp4
+        buildPhase: resources
     dependencies:
       - target: LingoPlay
     settings:

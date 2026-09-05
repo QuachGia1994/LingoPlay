@@ -14,6 +14,17 @@ class TimelinePlacementPolicyTest {
     }
 
     @Test
+    fun speechSeamFadeKeepsDurationAndZerosClipEdges() {
+        val samples = ShortArray(480) { 12_000 }
+        val faded = SpeechSeamPolicy.applyEdgeFade(samples, channels = 1, sampleRate = 48_000)
+
+        assertEquals(samples.size, faded.size)
+        assertEquals(0, faded.first().toInt())
+        assertEquals(0, faded.last().toInt())
+        assertTrue(faded[240].toInt() > 11_000)
+    }
+
+    @Test
     fun clampsMixedPcmToSigned16BitRange() {
         assertEquals(Short.MAX_VALUE, TimelinePlacementPolicy.clampPcm16(50_000))
         assertEquals(Short.MIN_VALUE, TimelinePlacementPolicy.clampPcm16(-50_000))

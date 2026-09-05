@@ -1,7 +1,6 @@
 package com.lingoplay.app
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -159,8 +158,8 @@ object SystemVietnameseTTSService {
         repeat(DurationFitPolicy.MAXIMUM_ATTEMPTS) { attempt ->
             val output = File(root, "${segment.id}-$attempt.wav")
             output.delete()
-            synthesizeOnce(tts, segment.translatedText, multiplier, output)
-            val durationMs = measuredDurationMs(output)
+            synthesizeOnce(tts, segment.spokenText, multiplier, output)
+            val durationMs = PcmWaveFile.durationMs(output)
 
             val fits = DurationFitPolicy.fits(durationMs, targetMs)
             val next = DurationFitPolicy.nextRateMultiplier(durationMs, targetMs, multiplier)
@@ -221,15 +220,4 @@ object SystemVietnameseTTSService {
         }
     }
 
-    private fun measuredDurationMs(file: File): Int {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(file.absolutePath)
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                ?: throw IllegalStateException("Unable to measure synthesized speech duration.")
-            max(1L, duration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        } finally {
-            retriever.release()
-        }
-    }
 }

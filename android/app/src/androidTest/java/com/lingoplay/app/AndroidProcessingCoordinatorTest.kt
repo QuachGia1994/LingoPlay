@@ -120,6 +120,38 @@ class AndroidProcessingCoordinatorTest {
     }
 
     @Test
+    fun stage22CleanBackgroundMultiSpeakerCloningRestoresTimelineOnlyAfterReferenceAnalysis() = runBlocking {
+        val root = createTempDirectory("lingoplay-stage22-composition-").toFile()
+        try {
+            val runtime = FakeRuntime(root, stage22Composition = true, timelineOffsetMs = 500)
+            val coordinator = AndroidProcessingCoordinator(runtime, translationConfigured = true)
+            val media = LocalMediaItem(Uri.EMPTY, "shifted.mp4", 3_000, 10, true)
+            val config = ProcessingConfig(
+                sourceLanguage = SourceLanguageChoice.ENGLISH,
+                targetLanguage = TargetLanguageChoice.ENGLISH,
+                preferredVoiceId = "en-a",
+                dubbingMode = DubbingModePreset.BALANCED,
+                subtitleMode = SubtitleMode.BILINGUAL,
+                speakerMode = SpeakerMode.MULTI,
+                voiceCloningEnabled = true,
+                cleanBackgroundEnabled = true,
+            )
+
+            val outcome = coordinator.run(media, reusableAudio = null, config = config) { }
+
+            assertTrue(outcome is ProcessingOutcome.Completed)
+            assertEquals("vocals.wav", runtime.diarizationAudioName)
+            assertEquals("vocals.wav", runtime.cloneReferenceAudioName)
+            assertEquals(0f, requireNotNull(runtime.cloneReferenceTranscriptStartSeconds), 0.0001f)
+            assertEquals(0.5f, requireNotNull(runtime.translatedTranscriptStartSeconds), 0.0001f)
+            assertEquals(1, runtime.synthesisCloneReferenceCount)
+            assertEquals("accompaniment.wav", runtime.renderBackgroundName)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun cancelledNativeReturnDeletesSessionBeforeCallerReceivesOutput() = runBlocking {
         val target = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         var session: File? = null
@@ -182,9 +214,17 @@ class AndroidProcessingCoordinatorTest {
         private val modelFailure: Throwable? = null,
         private val cancelAfterExtract: Boolean = false,
         private val cancelAfterSeparation: Boolean = false,
+        private val stage22Composition: Boolean = false,
+        private val timelineOffsetMs: Int = 0,
     ) : AndroidProcessingRuntime {
         val calls = mutableListOf<String>()
         var separationRoot: File? = null
+        var diarizationAudioName: String? = null
+        var cloneReferenceAudioName: String? = null
+        var cloneReferenceTranscriptStartSeconds: Float? = null
+        var translatedTranscriptStartSeconds: Float? = null
+        var synthesisCloneReferenceCount: Int = 0
+        var renderBackgroundName: String? = null
         private val audio = File(root, "audio.wav").apply { writeBytes(byteArrayOf(1)) }
         private val encoder = File(root, "encoder.onnx").apply { writeBytes(byteArrayOf(1)) }
         private val decoder = File(root, "decoder.onnx").apply { writeBytes(byteArrayOf(1)) }
@@ -197,6 +237,8 @@ class AndroidProcessingCoordinatorTest {
             if (cancelAfterExtract) kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.cancel()
             return audio
         }
+
+        override suspend fun audioTimelineOffsetMs(media: LocalMediaItem): Int = timelineOffsetMs
 
         override fun findWhisperModel(): SherpaWhisperModel? {
             calls += "model"
@@ -211,21 +253,34 @@ class AndroidProcessingCoordinatorTest {
             speakerMode: SpeakerMode,
         ): ASRTranscript {
             calls += "asr:${sourceLanguageCode ?: "auto"}"
-            return ASRTranscript("en", "hello", listOf(ASRSegment(0, 0f, 1f, "hello")))
+            return if (stage22Composition) {
+                ASRTranscript("en", "reference speech", listOf(ASRSegment(0, 0f, 2f, "reference speech")))
+            } else {
+                ASRTranscript("en", "hello", listOf(ASRSegment(0, 0f, 1f, "hello")))
+            }
         }
 
-        override fun findSpeakerModel(): SpeakerDiarizationModel? = null
+        override fun findSpeakerModel(): SpeakerDiarizationModel? =
+            if (stage22Composition) SpeakerDiarizationModel(encoder, decoder) else null
 
         override suspend fun diarize(
             audioFile: File,
             model: SpeakerDiarizationModel,
-        ): SpeakerDiarizationDocument = SpeakerDiarizationDocument(emptyList(), emptyList())
+        ): SpeakerDiarizationDocument {
+            diarizationAudioName = audioFile.name
+            return if (stage22Composition) {
+                SpeakerDiarizationDocument(listOf(SpeakerTurn(0, 2_000, "speaker_1")), listOf("speaker_1"))
+            } else {
+                SpeakerDiarizationDocument(emptyList(), emptyList())
+            }
+        }
 
-        override suspend fun availableVoices(): List<OfflineVoiceOption> = emptyList()
+        override suspend fun availableVoices(): List<OfflineVoiceOption> =
+            if (stage22Composition) listOf(OfflineVoiceOption("en-a", "English A", "en")) else emptyList()
 
-        override fun voiceCloningModelInstalled(): Boolean = false
+        override fun voiceCloningModelInstalled(): Boolean = stage22Composition
 
-        override fun sourceSeparationAvailable(): Boolean = cancelAfterSeparation
+        override fun sourceSeparationAvailable(): Boolean = cancelAfterSeparation || stage22Composition
 
         override suspend fun separateAudio(audioFile: File): SeparatedAudioStems {
             calls += "separate"
@@ -240,7 +295,15 @@ class AndroidProcessingCoordinatorTest {
         override suspend fun buildVoiceCloneReferences(
             audioFile: File,
             transcript: ASRTranscript,
-        ): Map<String, VoiceCloneReference> = emptyMap()
+        ): Map<String, VoiceCloneReference> {
+            cloneReferenceAudioName = audioFile.name
+            cloneReferenceTranscriptStartSeconds = transcript.segments.firstOrNull()?.startSeconds
+            return if (stage22Composition) {
+                mapOf("speaker_1" to VoiceCloneReference(FloatArray(24_000), 24_000, "reference speech"))
+            } else {
+                emptyMap()
+            }
+        }
 
         override suspend fun translate(
             transcript: ASRTranscript,
@@ -249,8 +312,10 @@ class AndroidProcessingCoordinatorTest {
             onProgress: suspend (Int, Int) -> Unit,
         ): TranslationDocument {
             calls += "translate:$targetLanguage:${mode.name}"
+            translatedTranscriptStartSeconds = transcript.segments.firstOrNull()?.startSeconds
             onProgress(1, 1)
-            return TranslationDocument("en", targetLanguage, listOf(TranslationSegment("s0", 0, 1_000, "hello", "こんにちは")), mode)
+            val startMs = ((transcript.segments.firstOrNull()?.startSeconds ?: 0f) * 1_000f).toInt()
+            return TranslationDocument("en", targetLanguage, listOf(TranslationSegment("s0", startMs, startMs + 1_000, "hello", "hello")), mode)
         }
 
         override suspend fun synthesize(
@@ -261,8 +326,10 @@ class AndroidProcessingCoordinatorTest {
             onProgress: suspend (Int, Int) -> Unit,
         ): DubSpeechDocument {
             calls += "tts:${preferredVoiceId ?: "auto"}"
+            synthesisCloneReferenceCount = cloneReferences.size
             onProgress(1, 1)
-            return DubSpeechDocument("voice", listOf(DubSpeechSegment("s0", 0, 1_000, dubAudio, 900, 100, 1f)))
+            val startMs = document.segments.firstOrNull()?.startMs ?: 0
+            return DubSpeechDocument("voice", listOf(DubSpeechSegment("s0", startMs, startMs + 1_000, dubAudio, 900, 100, 1f)))
         }
 
         override suspend fun render(
@@ -276,6 +343,17 @@ class AndroidProcessingCoordinatorTest {
             onPhase(MixPhase.REMUXING)
             onPhase(MixPhase.COMPLETED)
             return LocalDubMediaResult(video, media.durationMs)
+        }
+
+        override suspend fun render(
+            media: LocalMediaItem,
+            dub: DubSpeechDocument,
+            mode: DubbingModePreset,
+            backgroundAudioFile: File?,
+            onPhase: suspend (MixPhase) -> Unit,
+        ): LocalDubMediaResult {
+            renderBackgroundName = backgroundAudioFile?.name
+            return render(media, dub, mode, onPhase)
         }
 
         override suspend fun save(

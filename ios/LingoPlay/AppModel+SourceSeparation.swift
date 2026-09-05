@@ -4,6 +4,7 @@ struct ProcessingAudioSources: Sendable {
     let preparedAudioURL: URL
     let analysisAudioURL: URL
     let backgroundAudioURL: URL?
+    let timelineOffsetSeconds: TimeInterval
 }
 
 @MainActor
@@ -13,6 +14,8 @@ extension AppModel {
         var separated: SeparatedAudioStems?
         defer { separated?.cleanup() }
         do {
+            let timelineOffsetSeconds = try await MediaTimelinePolicy.audioStartOffsetSeconds(for: run.media.localURL)
+            guard isActive(run) else { return }
             let sources: ProcessingAudioSources
             if run.config.cleanBackgroundEnabled {
                 guard CleanBackgroundCapability.isAvailable else {
@@ -28,13 +31,15 @@ extension AppModel {
                 sources = ProcessingAudioSources(
                     preparedAudioURL: preparedAudioURL,
                     analysisAudioURL: stems.voiceURL,
-                    backgroundAudioURL: stems.backgroundURL
+                    backgroundAudioURL: stems.backgroundURL,
+                    timelineOffsetSeconds: timelineOffsetSeconds
                 )
             } else {
                 sources = ProcessingAudioSources(
                     preparedAudioURL: preparedAudioURL,
                     analysisAudioURL: preparedAudioURL,
-                    backgroundAudioURL: nil
+                    backgroundAudioURL: nil,
+                    timelineOffsetSeconds: timelineOffsetSeconds
                 )
             }
             await recognizeSpeech(from: sources, run: run)

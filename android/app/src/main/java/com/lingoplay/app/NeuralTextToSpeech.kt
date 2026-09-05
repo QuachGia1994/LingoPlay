@@ -8,8 +8,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 internal enum class TTSRoute {
     SYSTEM,
@@ -165,7 +163,7 @@ object NeuralVietnameseTTSService {
             currentCoroutineContext().ensureActive()
             val output = File(root, "${segment.id}-$attempt.wav")
             output.delete()
-            val audio = tts.generate(segment.translatedText, sid = 0, speed = multiplier)
+            val audio = tts.generate(segment.spokenText, sid = 0, speed = multiplier)
             currentCoroutineContext().ensureActive()
             check(audio.samples.isNotEmpty() && audio.sampleRate > 0) {
                 "Neural Voice produced no audio for segment ${segment.id}."
@@ -173,10 +171,7 @@ object NeuralVietnameseTTSService {
             check(audio.save(output.absolutePath) && output.isFile && output.length() > 44L) {
                 "Neural Voice could not save segment ${segment.id}."
             }
-            val durationMs = max(
-                1,
-                (audio.samples.size.toDouble() * 1_000.0 / audio.sampleRate.toDouble()).roundToInt(),
-            )
+            val durationMs = PcmWaveFile.durationMs(output)
             val fits = DurationFitPolicy.fits(durationMs, targetMs)
             val next = DurationFitPolicy.nextRateMultiplier(durationMs, targetMs, multiplier)
             val finalAttempt = attempt == DurationFitPolicy.MAXIMUM_ATTEMPTS - 1

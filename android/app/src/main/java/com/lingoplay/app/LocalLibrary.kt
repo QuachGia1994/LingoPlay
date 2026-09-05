@@ -201,7 +201,7 @@ object LocalLibraryStore {
                     put("startMs", segment.startMs)
                     put("endMs", segment.endMs)
                     put("sourceText", segment.sourceText)
-                    put("translatedText", segment.translatedText)
+                    put("translatedText", segment.displayText)
                     put("speakerId", segment.speakerId ?: "")
                     put("overlappingSpeakerIds", JSONArray(segment.overlappingSpeakerIds))
                 })

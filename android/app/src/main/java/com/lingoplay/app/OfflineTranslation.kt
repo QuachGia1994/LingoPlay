@@ -125,15 +125,15 @@ object OfflineTranslationService {
             val translated = sourceSegments.mapIndexed { index, source ->
                 coroutineContext.ensureActive()
                 val result = withTimeout(60_000) { translator.translate(source.text).await() }
-                val cleaned = TranslationTextPolicy.speechText(result)
-                check(cleaned.isNotEmpty()) { "Offline translation returned empty text." }
+                val displayText = TranslationTextPolicy.displayText(result)
+                check(TranslationTextPolicy.speechText(displayText).isNotEmpty()) { "Offline translation returned empty text." }
                 onProgress(index + 1, sourceSegments.size)
                 TranslationSegment(
                     id = source.id,
                     startMs = source.startMs,
                     endMs = source.endMs,
                     sourceText = source.text,
-                    translatedText = cleaned,
+                    translatedText = displayText,
                     speakerId = source.speakerId,
                     overlappingSpeakerIds = source.overlappingSpeakerIds,
                 )

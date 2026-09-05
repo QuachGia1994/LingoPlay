@@ -10,7 +10,11 @@ extension AppModel {
         guard isActive(run) else { return }
         guard run.config.speakerMode == .multi else {
             speakerState = .idle
-            await translateTranscript(transcript, cloneReferences: [:], sources: sources, run: run)
+            let timelineTranscript = ASRTimelinePolicy.shifted(
+                transcript,
+                offsetSeconds: sources.timelineOffsetSeconds
+            )
+            await translateTranscript(timelineTranscript, cloneReferences: [:], sources: sources, run: run)
             return
         }
         guard let model = SpeakerDiarizationModelStore().model() else {
@@ -92,7 +96,11 @@ extension AppModel {
             }
             // Unknown/mixed speech uses the selected offline voices when no safe reference exists.
         }
-        await translateTranscript(annotated, cloneReferences: cloneReferences, sources: sources, run: resolvedRun)
+        let timelineTranscript = ASRTimelinePolicy.shifted(
+            annotated,
+            offsetSeconds: sources.timelineOffsetSeconds
+        )
+        await translateTranscript(timelineTranscript, cloneReferences: cloneReferences, sources: sources, run: resolvedRun)
     }
 
     func cycleSpeakerMode() {

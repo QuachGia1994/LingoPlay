@@ -80,6 +80,36 @@ internal object AudioQualityPolicy {
     }
 }
 
+internal object SpeechSeamPolicy {
+    const val EDGE_FADE_MS = 8
+
+    fun applyEdgeFade(samples: ShortArray, channels: Int, sampleRate: Int): ShortArray {
+        require(channels > 0 && sampleRate > 0)
+        if (samples.isEmpty()) return samples
+        val frames = samples.size / channels
+        if (frames <= 1) return samples.copyOf()
+        val fadeFrames = minOf(
+            frames / 2,
+            max(1, sampleRate * EDGE_FADE_MS / 1_000),
+        )
+        if (fadeFrames <= 0) return samples.copyOf()
+        val output = samples.copyOf()
+        val denominator = max(1, fadeFrames - 1).toFloat()
+        for (frame in 0 until fadeFrames) {
+            val fadeIn = frame.toFloat() / denominator
+            val fadeOut = (fadeFrames - 1 - frame).toFloat() / denominator
+            val tailFrame = frames - fadeFrames + frame
+            for (channel in 0 until channels) {
+                val headIndex = frame * channels + channel
+                val tailIndex = tailFrame * channels + channel
+                output[headIndex] = (output[headIndex] * fadeIn).roundToInt().toShort()
+                output[tailIndex] = (output[tailIndex] * fadeOut).roundToInt().toShort()
+            }
+        }
+        return output
+    }
+}
+
 object TimelinePlacementPolicy {
     const val DUCK_FLOOR = 0.16f
     const val DUCK_FADE_MS = 120
@@ -359,7 +389,7 @@ object TimelineMixService {
         backgroundAudioFile: File,
         destination: File,
     ) {
-        val wav = readWavInfo(backgroundAudioFile)
+        val wav = PcmWaveFile.readInfo(backgroundAudioFile)
         require(wav.audioFormat == 1 && wav.bitsPerSample == 16) {
             "Clean Background accompaniment must be PCM16 WAV."
         }
@@ -454,18 +484,8 @@ object TimelineMixService {
         check(destination.isFile && destination.length() > 0L) { "Mixed Clean Background AAC export produced no output." }
     }
 
-    internal fun originalAudioStartUs(context: Context, sourceUri: Uri): Long {
-        val extractor = openExtractor(context, sourceUri)
-        return try {
-            val audioTrack = (0 until extractor.trackCount).firstOrNull { index ->
-                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: return 0L
-            extractor.selectTrack(audioTrack)
-            extractor.sampleTime.coerceAtLeast(0L)
-        } finally {
-            extractor.release()
-        }
-    }
+    internal fun originalAudioStartUs(context: Context, sourceUri: Uri): Long =
+        LocalMediaRepository.audioStartUs(context, sourceUri)
 
     private fun mixOriginalAndSpeech(
         pcm: ShortArray,
@@ -757,14 +777,18 @@ object TimelineMixService {
         fun load(segment: DubSpeechSegment, targetRate: Int, targetChannels: Int): ResampledClip {
             val key = "${segment.id}:$targetRate:$targetChannels"
             return cache.getOrPut(key) {
-                val wav = readWavInfo(segment.audioFile)
+                val wav = PcmWaveFile.readInfo(segment.audioFile)
                 require(wav.audioFormat == 1 && wav.bitsPerSample == 16 && wav.channels in 1..2) {
                     "Vietnamese TTS clip ${segment.id} is not supported 16-bit PCM WAV."
                 }
-                val input = readWavSamples(wav)
+                val input = PcmWaveFile.readSamples(wav)
                 val convertedChannels = convertClipChannels(input, wav.channels, targetChannels)
                 val resampled = resampleClip(convertedChannels, wav.sampleRate, targetRate, targetChannels)
-                ResampledClip(AudioQualityPolicy.normalizeSpeech(resampled), targetChannels)
+                val normalized = AudioQualityPolicy.normalizeSpeech(resampled)
+                ResampledClip(
+                    SpeechSeamPolicy.applyEdgeFade(normalized, targetChannels, targetRate),
+                    targetChannels,
+                )
             }
         }
 
@@ -912,68 +936,6 @@ object TimelineMixService {
         }
     }
 
-    private data class WavPcmInfo(
-        val file: File,
-        val audioFormat: Int,
-        val channels: Int,
-        val sampleRate: Int,
-        val bitsPerSample: Int,
-        val dataOffset: Long,
-        val dataSize: Long,
-    )
-
-    private fun readWavInfo(file: File): WavPcmInfo {
-        RandomAccessFile(file, "r").use { input ->
-            require(readFourCC(input) == "RIFF") { "Synthesized speech is not a RIFF WAV file." }
-            readUInt32LE(input)
-            require(readFourCC(input) == "WAVE") { "Synthesized speech is not a WAV file." }
-            var audioFormat = -1
-            var channels = -1
-            var sampleRate = -1
-            var bitsPerSample = -1
-            var dataOffset = -1L
-            var dataSize = -1L
-            while (input.filePointer + 8L <= input.length()) {
-                val id = readFourCC(input)
-                val size = readUInt32LE(input)
-                val payloadStart = input.filePointer
-                when (id) {
-                    "fmt " -> {
-                        require(size >= 16L) { "Invalid WAV fmt chunk." }
-                        audioFormat = readUInt16LE(input)
-                        channels = readUInt16LE(input)
-                        sampleRate = readUInt32LE(input).toInt()
-                        readUInt32LE(input)
-                        readUInt16LE(input)
-                        bitsPerSample = readUInt16LE(input)
-                    }
-                    "data" -> {
-                        dataOffset = payloadStart
-                        dataSize = minOf(size, input.length() - payloadStart)
-                    }
-                }
-                val padded = size + (size and 1L)
-                input.seek((payloadStart + padded).coerceAtMost(input.length()))
-                if (audioFormat > 0 && dataOffset >= 0L) break
-            }
-            require(audioFormat > 0 && channels > 0 && sampleRate > 0 && bitsPerSample > 0 && dataOffset >= 0L && dataSize > 0L) {
-                "Synthesized WAV metadata is incomplete."
-            }
-            return WavPcmInfo(file, audioFormat, channels, sampleRate, bitsPerSample, dataOffset, dataSize)
-        }
-    }
-
-    private fun readWavSamples(wav: WavPcmInfo): ShortArray {
-        require(wav.dataSize <= Int.MAX_VALUE.toLong()) { "A single synthesized speech clip is too large to mix." }
-        val bytes = ByteArray(wav.dataSize.toInt())
-        RandomAccessFile(wav.file, "r").use { input ->
-            input.seek(wav.dataOffset)
-            input.readFully(bytes)
-        }
-        val shortBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        return ShortArray(shortBuffer.remaining()).also { shortBuffer.get(it) }
-    }
-
     private fun readRotation(context: Context, uri: Uri): Int? {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -1007,24 +969,6 @@ object TimelineMixService {
             descriptor.close()
         }
         return extractor
-    }
-
-    private fun readFourCC(input: RandomAccessFile): String {
-        val bytes = ByteArray(4)
-        input.readFully(bytes)
-        return bytes.toString(Charsets.US_ASCII)
-    }
-
-    private fun readUInt16LE(input: RandomAccessFile): Int {
-        val bytes = ByteArray(2)
-        input.readFully(bytes)
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF
-    }
-
-    private fun readUInt32LE(input: RandomAccessFile): Long {
-        val bytes = ByteArray(4)
-        input.readFully(bytes)
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFF_FFFFL
     }
 
     private fun purgeRenderCache(parent: File, exclude: File? = null) {
