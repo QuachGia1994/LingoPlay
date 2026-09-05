@@ -9,6 +9,7 @@ All notable changes to LingoPlay are documented here.
 - Store-readiness documentation records the exact external blockers while Apple Developer/App Store Connect and Play Console accounts are unavailable, including future Worker secret names, products, signing, notifications, sandbox/license-tester and refund/revocation evidence.
 
 ### Fixed
+- Stage 22.1 runtime integrity: recovery checkpoints now carry an explicit schema version and reject unknown future formats; Android/iOS model deletion is blocked until cancelled native processing actually returns; iOS retains processing task/run ownership through synchronous native cancellation; stale source-separation cache sessions are purged on next launch after process death.
 - iOS Stage 21 DEBUG builds now expose immutable Plus product identifiers as nonisolated constants, fixing Swift 6 actor-isolation compilation in the local StoreKit entitlement path without weakening server authority in Release.
 - Stage 20.1 Clean Background runtime integrity: Spleeter now processes bounded core windows with guard context and absolute-frame core cropping instead of hard-stitching independent 12-second outputs; Android also cleans a completed native separation result if coroutine cancellation lands before coordinator ownership transfers.
 - Clean Background preserves the original source-audio timeline origin when inserting separated accompaniment. Android reads the generated PCM16 accompaniment WAV directly instead of depending on an OEM `audio/raw` MediaCodec decoder.

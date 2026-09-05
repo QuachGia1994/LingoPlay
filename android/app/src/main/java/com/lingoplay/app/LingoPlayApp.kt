@@ -85,6 +85,7 @@ fun LingoPlayApp() {
     val plusStore = remember(context) { AndroidPlusStore(context.applicationContext) }
     val dubbingState = remember(context) { DubbingPreferenceState(DubbingPreferencesStore(context)) }
     var activeProcessingConfig by remember { mutableStateOf<ProcessingConfig?>(null) }
+    var processingLifetimeActive by remember { mutableStateOf(false) }
     val sourceLanguage = dubbingState.sourceLanguage
     val targetLanguage = dubbingState.targetLanguage
     val translationMode = dubbingState.translationMode
@@ -141,9 +142,7 @@ fun LingoPlayApp() {
     }
     val cancelModelInstall: () -> Unit = stage19Models::cancelSpeech
     val deleteModel: () -> Unit = {
-        stage19Models.deleteSpeech(
-            canDelete = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
-        )
+        stage19Models.deleteSpeech(canDelete = !processingLifetimeActive)
     }
     val refreshVoiceOptions: suspend () -> Unit = {
         dubbingState.updateOfflineVoices(OfflineDubbingTTSService.availableVoices(context))
@@ -154,7 +153,7 @@ fun LingoPlayApp() {
     val cancelNeuralVoiceInstall: () -> Unit = stage19Models::cancelNeural
     val deleteNeuralVoice: () -> Unit = {
         stage19Models.deleteNeural(
-            canDelete = ttsPhase != TTSPhase.SYNTHESIZING,
+            canDelete = !processingLifetimeActive,
             onChanged = refreshVoiceOptions,
         )
     }
@@ -168,26 +167,26 @@ fun LingoPlayApp() {
     }
     val cancelSpeakerModelInstall: () -> Unit = stage19Models::cancelSpeaker
     val deleteSpeakerModel: () -> Unit = {
-        stage19Models.deleteSpeaker(canDelete = speakerPhase != SpeakerPhase.ANALYZING)
+        stage19Models.deleteSpeaker(canDelete = !processingLifetimeActive)
     }
 
     val startCloningModelInstall: () -> Unit = { stage19Models.installCloning(wifiOnly) }
     val cancelCloningModelInstall: () -> Unit = stage19Models::cancelCloning
     val deleteCloningModel: () -> Unit = {
-        stage19Models.deleteCloning(canDelete = ttsPhase != TTSPhase.SYNTHESIZING)
+        stage19Models.deleteCloning(canDelete = !processingLifetimeActive)
     }
 
     val startSourceSeparationModelInstall: () -> Unit = { stage19Models.installSourceSeparation(wifiOnly) }
     val cancelSourceSeparationModelInstall: () -> Unit = stage19Models::cancelSourceSeparation
     val deleteSourceSeparationModel: () -> Unit = {
-        stage19Models.deleteSourceSeparation(canDelete = stageName != Stage.PROCESSING.name)
+        stage19Models.deleteSourceSeparation(canDelete = !processingLifetimeActive)
     }
 
     val toggleTranslationModel: (String) -> Unit = { code ->
         stage19Models.toggleTranslationModel(
             code = code,
             wifiOnly = wifiOnly,
-            canManage = translationPhaseName != TranslationPhase.TRANSLATING.name,
+            canManage = !processingLifetimeActive,
         )
     }
 
@@ -245,6 +244,7 @@ fun LingoPlayApp() {
     }
 
     LaunchedEffect(Unit) {
+        SourceSeparationCachePolicy.purgeStaleSessions(context)
         TTSCachePolicy.purgeAllSessions(context)
         plusStore.start()
         libraryItems = LocalLibraryStore.load(context)
@@ -280,7 +280,9 @@ fun LingoPlayApp() {
             translationError = null
             ttsError = null
             mixError = null
-            val outcome = processingCoordinator.run(
+            processingLifetimeActive = true
+            val outcome = try {
+                processingCoordinator.run(
                 media = media,
                 reusableAudio = reusableAudio,
                 config = runConfig,
@@ -338,7 +340,10 @@ fun LingoPlayApp() {
                             mixPhaseName = event.phase.name
                         }
                     }
+                    }
                 }
+            } finally {
+                processingLifetimeActive = false
             }
 
             when (outcome) {
@@ -635,19 +640,19 @@ fun LingoPlayApp() {
                             voiceLabel = preferredVoiceLabel,
                             isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
-                            canDeleteModel = asrPhase != ASRPhase.LOADING_MODEL && asrPhase != ASRPhase.TRANSCRIBING,
+                            canDeleteModel = !processingLifetimeActive,
                             neuralVoiceInstallState = neuralVoiceInstallState,
-                            canDeleteNeuralVoice = ttsPhase != TTSPhase.SYNTHESIZING,
+                            canDeleteNeuralVoice = !processingLifetimeActive,
                             speakerModelInstallState = speakerModelInstallState,
-                            canDeleteSpeakerModel = speakerPhase != SpeakerPhase.ANALYZING,
+                            canDeleteSpeakerModel = !processingLifetimeActive,
                             cloningModelInstallState = cloningModelInstallState,
-                            canDeleteCloningModel = ttsPhase != TTSPhase.SYNTHESIZING,
+                            canDeleteCloningModel = !processingLifetimeActive,
                             sourceSeparationModelInstallState = sourceSeparationModelInstallState,
-                            canDeleteSourceSeparationModel = stageName != Stage.PROCESSING.name,
+                            canDeleteSourceSeparationModel = !processingLifetimeActive,
                             downloadedTranslationModelCodes = downloadedTranslationModelCodes,
                             translationModelBusyCode = translationModelBusyCode,
                             translationModelError = translationModelError,
-                            canManageTranslationModels = translationPhase != TranslationPhase.TRANSLATING,
+                            canManageTranslationModels = !processingLifetimeActive,
                             onInstallModel = startModelInstall,
                             onCancelModel = cancelModelInstall,
                             onDeleteModel = deleteModel,

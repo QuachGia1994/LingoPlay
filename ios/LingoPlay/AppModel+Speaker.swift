@@ -140,7 +140,7 @@ extension AppModel {
     }
 
     var canDeleteSpeakerModel: Bool {
-        speakerState != .analyzing
+        !processingLifetimeActive
     }
 
     func installVoiceCloningModel() {
@@ -183,7 +183,6 @@ extension AppModel {
     }
 
     var canDeleteVoiceCloningModel: Bool {
-        if case .synthesizing = ttsState { return false }
-        return true
+        !processingLifetimeActive
     }
 }

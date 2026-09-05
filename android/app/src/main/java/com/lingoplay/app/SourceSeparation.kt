@@ -30,6 +30,12 @@ data class SeparatedAudioStems(
     }
 }
 
+internal object SourceSeparationCachePolicy {
+    fun purgeStaleSessions(context: android.content.Context) {
+        File(context.cacheDir, "lingoplay/separated-audio").deleteRecursively()
+    }
+}
+
 interface SourceSeparationEngine {
     val availability: SourceSeparationAvailability
     suspend fun separate(sourceAudio: File): SeparatedAudioStems

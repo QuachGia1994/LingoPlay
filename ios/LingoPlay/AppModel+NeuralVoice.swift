@@ -45,7 +45,6 @@ extension AppModel {
     }
 
     var canDeleteNeuralVoice: Bool {
-        if case .synthesizing = ttsState { return false }
-        return true
+        !processingLifetimeActive
     }
 }

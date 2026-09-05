@@ -1,5 +1,14 @@
 import Foundation
 
+enum ProcessingRecoverySchema {
+    static let currentVersion = 1
+
+    static func isSupported(_ version: Int?) -> Bool {
+        let resolved = version ?? 0
+        return (0...currentVersion).contains(resolved)
+    }
+}
+
 struct ProcessingRecoveryCheckpoint: Sendable, Equatable {
     let media: LocalMediaItem
     let preparedAudioURL: URL?
@@ -14,6 +23,7 @@ struct ProcessingRecoveryCheckpoint: Sendable, Equatable {
 
 actor ProcessingRecoveryStore {
     private struct Record: Codable {
+        let schemaVersion: Int?
         let mediaID: UUID
         let mediaPath: String
         let title: String
@@ -42,6 +52,11 @@ actor ProcessingRecoveryStore {
               let data = try? Data(contentsOf: file),
               let record = try? JSONDecoder().decode(Record.self, from: data)
         else { return nil }
+
+        guard ProcessingRecoverySchema.isSupported(record.schemaVersion) else {
+            try? fileManager.removeItem(at: file)
+            return nil
+        }
 
         let mediaURL = URL(fileURLWithPath: record.mediaPath)
         guard fileManager.fileExists(atPath: mediaURL.path) else {
@@ -75,6 +90,7 @@ actor ProcessingRecoveryStore {
         try Task.checkCancellation()
         guard fileManager.fileExists(atPath: media.localURL.path) else { return }
         let record = Record(
+            schemaVersion: ProcessingRecoverySchema.currentVersion,
             mediaID: media.id,
             mediaPath: media.localURL.path,
             title: media.title,

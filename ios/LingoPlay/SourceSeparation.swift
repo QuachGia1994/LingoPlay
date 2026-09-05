@@ -35,6 +35,15 @@ struct SeparatedAudioStems: Sendable, Equatable {
     }
 }
 
+enum SourceSeparationCachePolicy {
+    static func purgeStaleSessions() {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        try? FileManager.default.removeItem(
+            at: caches.appendingPathComponent("LingoPlay/SeparatedAudio", isDirectory: true)
+        )
+    }
+}
+
 protocol SourceSeparationEngine: Sendable {
     var availability: SourceSeparationAvailability { get }
     func separate(sourceAudioURL: URL) async throws -> SeparatedAudioStems

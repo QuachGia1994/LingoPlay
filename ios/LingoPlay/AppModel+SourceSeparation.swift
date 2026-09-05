@@ -87,6 +87,6 @@ extension AppModel {
     }
 
     var canDeleteSourceSeparationModel: Bool {
-        stage != .processing
+        !processingLifetimeActive
     }
 }

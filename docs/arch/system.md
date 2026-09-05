@@ -1,6 +1,6 @@
 # System architecture
 
-> updated 2026-09-05 · Stage 21 account-independent release engineering
+> updated 2026-09-05 · Stage 22 runtime-integrity audit
 
 ## Goal
 Keep the heavy media path local while exposing a small server boundary for translation/provider access and entitlement state.
@@ -175,5 +175,13 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Temporary stems stay owned by the active processing run and are deleted on success, failure, cancellation or stale-result rejection. Missing executable runtime or verified model fails closed and never silently falls back after the user explicitly enabled Clean Background.
 - Capability UI reports executable readiness only when runtime + verified installed model are present. `cleanBackgroundVerified=false` remains a separate cross-device quality/performance certification flag until physical Android and iPhone output evidence exists.
 
+## Stage 22.1 runtime-integrity boundary
+- Android and iOS recovery checkpoints now carry schema version `1`. Missing version is treated as legacy schema `0`; unknown future/negative schema versions are rejected instead of being interpreted with stale field semantics.
+- Model mutation is blocked for the entire processing lifetime, not merely while the Processing screen or one phase enum is visible. This prevents Back→Settings from deleting Whisper, ML Kit, neural TTS, diarization, ZipVoice, or Spleeter files while a cancelled synchronous native call is still unwinding.
+- iOS cancellation keeps the tracked processing task and run identity owned until native return. `Task.isCancelled` and stage/media identity invalidate stale results immediately; a replacement run can take a new run ID without an older defer clearing the replacement task.
+- Spleeter, diarization, and ZipVoice synchronous native results are followed by cancellation checks before state/result promotion. Android retains its serialized `ProcessingRunGate`; iOS waits cancelled processing before recovery refresh.
+- Source-separation session directories are transient across process death as well as normal success/failure/cancel: startup purges stale separated-audio cache directories on both platforms. TTS session cleanup remains independently enforced.
+- Resume continues from the checkpoint's immutable processing snapshot and only revalidates current cloning consent; Settings changes after the original run began do not silently rewrite the recovered run.
+
 ## Current stage
-Stage 18 is functionally closed. Stage 19.2 engineering/CI closure is complete on `871c853`: Android run `33949966315` and iOS run `33949966327` both succeeded, including the focused iOS Stage 19 runtime regressions. Stage 20 source-separation engineering is being closed with source/unit/build/CI evidence; physical Meizu/iPhone output and performance certification are intentionally excluded from the current closure request. Stage 21 production distribution remains separate.
+Stage 21 account-independent engineering is complete on `c216daa`; Android CI `33966665215` and iOS CI `33966665140` are green. Stage 22 final zero-trust audit is active: 22.1 Runtime Integrity is under source/unit/device verification, followed by 22.2 Media Fidelity, 22.3 Model Supply Chain, 22.4 Security & Privacy, and 22.5 Device Stress/Accessibility. Stage 22.6 Store & Release Certification remains externally blocked by Apple Developer/App Store Connect and Google Play Console accounts plus deferred physical iPhone evidence.

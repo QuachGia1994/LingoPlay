@@ -140,10 +140,12 @@ final class AppModel {
     private var processingTask: Task<Void, Never>?
     var activeProcessingRunID: UUID?
     var activeProcessingConfig: ProcessingConfig?
+    var processingLifetimeActive: Bool { processingTask != nil }
 
     func finishSplash() {
         stage = .home
         plusStore.start()
+        SourceSeparationCachePolicy.purgeStaleSessions()
         TTSCachePolicy.purgeAllSessions()
         Task {
             await refreshLibrary()
@@ -267,8 +269,7 @@ final class AppModel {
         recoveryRefreshID = UUID()
         let task = processingTask
         task?.cancel()
-        // Keep the cancelled task owned until native work returns; replacement awaits it.
-        activeProcessingRunID = nil
+        // Keep both task ownership and run identity until native work returns; Task cancellation makes the run inactive.
         return task
     }
 
@@ -546,7 +547,7 @@ final class AppModel {
     }
 
     func deleteSpeechModel() {
-        guard asrState != .loadingModel, asrState != .transcribing else { return }
+        guard canDeleteSpeechModel else { return }
         modelInstallTask?.cancel()
         modelInstallTask = nil
         Task {
@@ -560,7 +561,7 @@ final class AppModel {
     }
 
     var canDeleteSpeechModel: Bool {
-        asrState != .loadingModel && asrState != .transcribing
+        !processingLifetimeActive
     }
 
     func openLibraryItem(_ item: LocalLibraryItem) async {

@@ -24,6 +24,12 @@ data class ProcessingCheckpoint(
     val canResumeFromAudio: Boolean get() = preparedAudioFile?.isFile == true
 }
 
+internal object ProcessingCheckpointSchema {
+    const val CURRENT_VERSION = 1
+
+    fun isSupported(version: Int): Boolean = version in 0..CURRENT_VERSION
+}
+
 object ProcessingCheckpointStore {
     private const val ROOT = "lingoplay/recovery"
     private const val FILE_NAME = "processing.json"
@@ -32,6 +38,11 @@ object ProcessingCheckpointStore {
         val file = checkpointFile(context)
         if (!file.isFile) return@runCatching null
         val json = JSONObject(file.readText(Charsets.UTF_8))
+        val schemaVersion = json.optInt("schemaVersion", 0)
+        if (!ProcessingCheckpointSchema.isSupported(schemaVersion)) {
+            file.delete()
+            return@runCatching null
+        }
         val mediaFile = File(json.getString("mediaPath"))
         if (!mediaFile.isFile || mediaFile.length() <= 0L) {
             file.delete()
@@ -64,6 +75,7 @@ object ProcessingCheckpointStore {
         val file = checkpointFile(context)
         file.parentFile?.mkdirs()
         val json = JSONObject().apply {
+            put("schemaVersion", ProcessingCheckpointSchema.CURRENT_VERSION)
             put("mediaPath", mediaFile.absolutePath)
             put("name", media.name)
             put("durationMs", media.durationMs)

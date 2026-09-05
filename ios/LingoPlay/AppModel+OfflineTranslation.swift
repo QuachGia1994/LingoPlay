@@ -3,8 +3,7 @@ import Foundation
 @MainActor
 extension AppModel {
     var canManageOfflineTranslationModels: Bool {
-        if case .translating = translationState { return false }
-        return translationModelBusyCode == nil
+        !processingLifetimeActive && translationModelBusyCode == nil
     }
 
     func refreshOfflineTranslationModels() {
