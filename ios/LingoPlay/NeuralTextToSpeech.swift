@@ -39,6 +39,7 @@ actor NeuralVietnameseTTSService {
             throw TTSError.synthesisFailed("The installed Neural Voice supports Vietnamese output only.")
         }
 
+        try Task.checkCancellation()
         let vits = sherpaOnnxOfflineTtsVitsModelConfig(
             model: model.modelURL.path,
             lexicon: "",
@@ -68,6 +69,7 @@ actor NeuralVietnameseTTSService {
             output.append(try synthesizeSegment(segment, tts: tts, root: root))
             await progress(index + 1, document.segments.count)
         }
+        try Task.checkCancellation()
         succeeded = true
         return DubSpeechDocument(
             voiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
@@ -84,9 +86,11 @@ actor NeuralVietnameseTTSService {
         var multiplier: Float = 1
 
         for attempt in 0..<DurationFitPolicy.maximumAttempts {
+            try Task.checkCancellation()
             let fileURL = root.appendingPathComponent("\(segment.id)-\(attempt).wav")
             try? FileManager.default.removeItem(at: fileURL)
             let audio = tts.generate(text: segment.translatedText, sid: 0, speed: multiplier)
+            try Task.checkCancellation()
             guard audio.audio != nil, audio.n > 0, audio.sampleRate > 0 else {
                 throw TTSError.synthesisFailed("Neural Voice produced no audio for segment \(segment.id).")
             }
@@ -172,6 +176,12 @@ final class OfflineDubbingTTSService {
         let cloneableIDs = Set(cloneable.map(\.id))
         let fallback = document.segments.filter { !cloneableIDs.contains($0.id) }
         var output: [DubSpeechSegment] = []
+        var succeeded = false
+        defer {
+            if !succeeded {
+                TTSCachePolicy.cleanup(document: DubSpeechDocument(voiceIdentifier: "partial", segments: output))
+            }
+        }
         var completed = 0
 
         if !cloneable.isEmpty {
@@ -214,6 +224,8 @@ final class OfflineDubbingTTSService {
 
         let order = Dictionary(uniqueKeysWithValues: document.segments.enumerated().map { ($1.id, $0) })
         output.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        try Task.checkCancellation()
+        succeeded = true
         return DubSpeechDocument(voiceIdentifier: "hybrid:clone-local", segments: output)
     }
 
@@ -242,6 +254,12 @@ final class OfflineDubbingTTSService {
         }
 
         var output: [DubSpeechSegment] = []
+        var succeeded = false
+        defer {
+            if !succeeded {
+                TTSCachePolicy.cleanup(document: DubSpeechDocument(voiceIdentifier: "partial", segments: output))
+            }
+        }
         var completed = 0
         for group in grouped {
             let partial = try await synthesizeWithVoice(
@@ -261,6 +279,8 @@ final class OfflineDubbingTTSService {
         }
         let order = Dictionary(uniqueKeysWithValues: document.segments.enumerated().map { ($1.id, $0) })
         output.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+        try Task.checkCancellation()
+        succeeded = true
         return DubSpeechDocument(
             voiceIdentifier: "multi-speaker:\(grouped.count)",
             segments: output

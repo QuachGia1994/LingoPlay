@@ -19,7 +19,6 @@ import java.io.FileInputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -37,7 +36,11 @@ internal object VoiceCloningPolicy {
     fun supportsTarget(languageCode: String): Boolean =
         languageCode.trim().lowercase().substringBefore('-') in supportedLanguages
 
+    fun supportsPair(source: String, target: String): Boolean =
+        supportsTarget(source) && supportsTarget(target)
+
     fun eligibleReferenceSegments(transcript: ASRTranscript): Map<String, ASRSegment> {
+        if (!supportsTarget(transcript.language)) return emptyMap()
         val result = linkedMapOf<String, ASRSegment>()
         transcript.segments.forEach { segment ->
             val speaker = segment.speakerId ?: return@forEach
@@ -316,25 +319,39 @@ object VoiceCloningModelInstaller {
 
 internal object VoiceCloneReferenceBuilder {
     private const val referenceSampleRate = 24_000
-    private const val maximumAudioSeconds = 15 * 60
-
     suspend fun build(
         audioFile: File,
         transcript: ASRTranscript,
     ): Map<String, VoiceCloneReference> {
         val selected = VoiceCloningPolicy.eligibleReferenceSegments(transcript)
         if (selected.isEmpty()) return emptyMap()
-        val allSamples = AndroidAudioDecoder.decodeResampledMono(
-            file = audioFile,
-            targetSampleRate = referenceSampleRate,
-            maxDurationSeconds = maximumAudioSeconds,
-        )
-        return selected.mapValues { (_, segment) ->
-            val start = max(0, (segment.startSeconds * referenceSampleRate).roundToInt()).coerceAtMost(allSamples.size)
-            val end = max(start + 1, (segment.endSeconds * referenceSampleRate).roundToInt()).coerceAtMost(allSamples.size)
-            val samples = if (start < end) allSamples.copyOfRange(start, end) else FloatArray(0)
-            VoiceCloneReference(samples, referenceSampleRate, segment.text)
-        }.filterValues { it.samples.isNotEmpty() }
+        // Decode once, retaining only the selected <=15-second windows.
+        val samples = selected.mapValues { (_, segment) ->
+            FloatArray(((segment.endSeconds - segment.startSeconds) * referenceSampleRate).roundToInt())
+        }
+        val written = selected.mapValues { 0 }.toMutableMap()
+        AndroidAudioDecoder.forEachChunk(audioFile, 5) { chunk ->
+            selected.forEach { (speaker, segment) ->
+                val output = samples.getValue(speaker)
+                val start = max(0, ((chunk.startSeconds - segment.startSeconds) * referenceSampleRate).roundToInt())
+                val end = minOf(output.size, ((chunk.endSeconds - segment.startSeconds) * referenceSampleRate).roundToInt())
+                for (index in start until end) {
+                    val position = (segment.startSeconds.toDouble() + index.toDouble() / referenceSampleRate -
+                        chunk.startSeconds.toDouble()) * chunk.sampleRate
+                    val left = position.toInt().coerceIn(0, chunk.samples.lastIndex)
+                    val right = minOf(left + 1, chunk.samples.lastIndex)
+                    val fraction = (position - left).toFloat().coerceIn(0f, 1f)
+                    output[index] = chunk.samples[left] + (chunk.samples[right] - chunk.samples[left]) * fraction
+                }
+                written[speaker] = written.getValue(speaker) + max(0, end - start)
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        return selected.mapNotNull { (speaker, segment) ->
+            val pcm = samples.getValue(speaker)
+            if (written.getValue(speaker) < pcm.size - referenceSampleRate / 20) null
+            else speaker to VoiceCloneReference(pcm, referenceSampleRate, segment.text)
+        }.toMap()
     }
 }
 
@@ -361,33 +378,38 @@ object HybridDubbingTTSService {
         }
         val fallback = document.segments.filterNot { it in cloneable }
         val output = mutableListOf<DubSpeechSegment>()
-        var completed = 0
-        if (cloneable.isNotEmpty()) {
-            val model = VoiceCloningModelStore.find(context)
-                ?: error("Voice Cloning model is not installed.")
-            val cloned = VoiceCloningTTSService.synthesize(
-                context = context,
-                document = document.copy(segments = cloneable),
-                model = model,
-                references = cloneReferences,
-            ) { local, _ -> onProgress(completed + local, document.segments.size) }
-            output += cloned.segments
-            completed += cloneable.size
+        try {
+            var completed = 0
+            if (cloneable.isNotEmpty()) {
+                val model = VoiceCloningModelStore.find(context)
+                    ?: error("Voice Cloning model is not installed.")
+                val cloned = VoiceCloningTTSService.synthesize(
+                    context = context,
+                    document = document.copy(segments = cloneable),
+                    model = model,
+                    references = cloneReferences,
+                ) { local, _ -> onProgress(completed + local, document.segments.size) }
+                output += cloned.segments
+                completed += cloneable.size
+            }
+            if (fallback.isNotEmpty()) {
+                val normal = OfflineDubbingTTSService.synthesize(
+                    context = context,
+                    document = document.copy(segments = fallback),
+                    preferredVoiceId = preferredVoiceId,
+                    speakerVoiceMap = speakerVoiceMap,
+                ) { local, _ -> onProgress(completed + local, document.segments.size) }
+                output += normal.segments
+            }
+            val order = document.segments.withIndex().associate { it.value.id to it.index }
+            return DubSpeechDocument(
+                voiceName = "hybrid:clone-local",
+                segments = output.sortedBy { order[it.id] ?: Int.MAX_VALUE },
+            )
+        } catch (error: Throwable) {
+            TTSCachePolicy.cleanup(DubSpeechDocument("partial", output))
+            throw error
         }
-        if (fallback.isNotEmpty()) {
-            val normal = OfflineDubbingTTSService.synthesize(
-                context = context,
-                document = document.copy(segments = fallback),
-                preferredVoiceId = preferredVoiceId,
-                speakerVoiceMap = speakerVoiceMap,
-            ) { local, _ -> onProgress(completed + local, document.segments.size) }
-            output += normal.segments
-        }
-        val order = document.segments.withIndex().associate { it.value.id to it.index }
-        return DubSpeechDocument(
-            voiceName = "hybrid:clone-local",
-            segments = output.sortedBy { order[it.id] ?: Int.MAX_VALUE },
-        )
     }
 }
 
@@ -398,9 +420,9 @@ object VoiceCloningTTSService {
         model: VoiceCloningModel,
         references: Map<String, VoiceCloneReference>,
         onProgress: suspend (Int, Int) -> Unit,
-    ): DubSpeechDocument = withContext(Dispatchers.Default) {
-        require(VoiceCloningPolicy.supportsTarget(document.targetLanguage)) {
-            "Voice Cloning currently supports English and Chinese output only."
+    ): DubSpeechDocument = TTSCachePolicy.synthesizeInSession(context, "clone-tts") { root ->
+        require(VoiceCloningPolicy.supportsPair(document.sourceLanguage, document.targetLanguage)) {
+            "Voice Cloning requires English or Chinese reference speech and output."
         }
         val zipvoice = OfflineTtsZipVoiceModelConfig(
             tokens = model.tokens.absolutePath,
@@ -416,7 +438,6 @@ object VoiceCloningTTSService {
             provider = "cpu",
         )
         val tts = OfflineTts(assetManager = null, config = OfflineTtsConfig(model = modelConfig))
-        val root = File(context.cacheDir, "lingoplay/clone-tts/${UUID.randomUUID()}").apply { mkdirs() }
         var succeeded = false
         try {
             val output = mutableListOf<DubSpeechSegment>()
@@ -429,6 +450,7 @@ object VoiceCloningTTSService {
                 output += synthesizeSegment(tts, segment, reference, root)
                 onProgress(index + 1, document.segments.size)
             }
+            currentCoroutineContext().ensureActive()
             succeeded = true
             DubSpeechDocument("clone:zipvoice", output)
         } finally {
@@ -437,7 +459,7 @@ object VoiceCloningTTSService {
         }
     }
 
-    private fun synthesizeSegment(
+    private suspend fun synthesizeSegment(
         tts: OfflineTts,
         segment: TranslationSegment,
         reference: VoiceCloneReference,
@@ -446,6 +468,7 @@ object VoiceCloningTTSService {
         val targetMs = DurationFitPolicy.targetDurationMs(segment.startMs, segment.endMs)
         var multiplier = 1.0f
         repeat(DurationFitPolicy.MAXIMUM_ATTEMPTS) { attempt ->
+            currentCoroutineContext().ensureActive()
             val output = File(root, "${segment.id}-$attempt.wav")
             output.delete()
             val config = GenerationConfig(
@@ -457,6 +480,7 @@ object VoiceCloningTTSService {
                 extra = mapOf("min_char_in_sentence" to "10"),
             )
             val audio = tts.generateWithConfig(segment.translatedText, config)
+            currentCoroutineContext().ensureActive()
             check(audio.samples.isNotEmpty() && audio.sampleRate > 0) { "Voice Cloning produced no audio for ${segment.id}." }
             check(audio.save(output.absolutePath) && output.length() > 44L) { "Voice Cloning could not save ${segment.id}." }
             val durationMs = max(1, (audio.samples.size.toDouble() * 1_000.0 / audio.sampleRate.toDouble()).roundToInt())

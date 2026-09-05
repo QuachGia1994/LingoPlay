@@ -20,6 +20,9 @@ The current product must not call adaptive ducking “clean dub” or “source 
 
 Stage 9 pre-wires iOS StoreKit 2 only. Weekly/monthly local subscription products use reserved IDs `com.lingoplay.plus.weekly` and `com.lingoplay.plus.monthly`. Until an Apple Developer account and App Store Connect products exist, `Products.storekit` is the local test catalog; current pre-release capabilities remain usable when products are unavailable.
 
+## Stage 19 pre-release behavior
+Multi-speaker processing and local EN/ZH Voice Cloning are optional and off by default. Cloning requires ownership consent plus an eligible current-video reference in a supported source language; Resume rechecks current consent. Mixed or unsupported reference speech uses ordinary installed offline voices. Speaker labels identify clusters within the current run, not a verified person across videos. Longer dubbed speech may extend output duration beyond the original video track so the last words remain audible.
+
 ## Product boundaries
 - No third-party media scraping/downloading in store builds.
 - No video/audio storage or processing on the backend.

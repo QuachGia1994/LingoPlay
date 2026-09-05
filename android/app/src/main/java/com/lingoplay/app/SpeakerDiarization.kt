@@ -58,7 +58,6 @@ data class SpeakerDiarizationDocument(
 internal object SpeakerDiarizationPolicy {
     private const val MIN_PRIMARY_OVERLAP_MS = 120
     private const val OVERLAP_MIN_MS = 120
-    private const val OVERLAP_RATIO = 0.35
 
     fun normalize(turns: List<Triple<Float, Float, Int>>): SpeakerDiarizationDocument {
         val valid = turns
@@ -89,7 +88,7 @@ internal object SpeakerDiarizationPolicy {
         if (primary.value < MIN_PRIMARY_OVERLAP_MS) return SpeakerAttribution(null)
         val overlapping = ranked
             .drop(1)
-            .filter { it.value >= OVERLAP_MIN_MS && it.value.toDouble() >= primary.value.toDouble() * OVERLAP_RATIO }
+            .filter { it.value >= OVERLAP_MIN_MS }
             .map { it.key }
         return if (overlapping.isEmpty()) {
             SpeakerAttribution(primary.key)
@@ -367,6 +366,7 @@ object SpeakerDiarizationService {
                 )
                 currentCoroutineContext().ensureActive()
                 val raw = diarizer.process(samples).map { Triple(it.start, it.end, it.speaker) }
+                currentCoroutineContext().ensureActive()
                 SpeakerDiarizationPolicy.normalize(raw)
             } finally {
                 diarizer.release()

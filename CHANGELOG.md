@@ -5,6 +5,11 @@ All notable changes to LingoPlay are documented here.
 ## [Unreleased]
 
 ### Fixed
+- Stage 19 audit repairs: Resume cloning now requires saved opt-in and current consent; both reference and output languages must be EN/ZH. Unsupported sources or absent clear references use installed offline voices.
+- Speaker attribution no longer hides a secondary speaker contributing at least 120 ms behind a 35% dominance threshold. Mixed chunks remain unknown and cannot supply clone references; words are not split without word timestamps.
+- Reference extraction retains only selected short PCM windows. Hybrid/multi-voice failures clean earlier successful groups; Android also cleans sessions when dispatcher cancellation discards a completed native result.
+- Final speech beyond the source-video end survives mix/remux and playback metadata, retaining the bounded iOS Vietnamese system-voice rate. The original video track is not extended with synthesized frames.
+- Cancelled iOS jobs remain owned until native return, replacement runs wait, checkpoint writes observe cancellation, and delayed recovery refresh cannot overwrite a newer run's UI.
 - iOS Stage 19 Voice Cloning now passes model arguments in the order required by the pinned sherpa-onnx Swift API, fixing the Xcode compilation failure.
 - Stage 19 Android multi-speaker processing now uses bounded 6-second ASR chunks instead of the normal long-form memory chunk size, so diarization labels survive onto transcript segments and clear single-speaker cloning references remain usable on-device.
 - Android saved-video playback no longer stops its newly created VideoView during first composition. Player cleanup follows AndroidView release and media identity; device regressions cover cold entry, repeated entry, speed changes and file replacement.

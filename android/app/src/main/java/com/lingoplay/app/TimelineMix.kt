@@ -84,6 +84,9 @@ object TimelinePlacementPolicy {
     const val DUCK_FLOOR = 0.16f
     const val DUCK_FADE_MS = 120
 
+    fun outputDurationMs(sourceDurationMs: Long, segments: List<DubSpeechSegment>): Long =
+        max(sourceDurationMs, segments.maxOfOrNull { it.startMs.toLong() + it.speechDurationMs } ?: 0L)
+
     fun frameAt(timeMs: Int, sampleRate: Int): Long {
         require(timeMs >= 0)
         require(sampleRate > 0)
@@ -164,7 +167,7 @@ object TimelineMixService {
             success = true
             onPhase(MixPhase.COMPLETED)
             purgeRenderCache(parent, exclude = root)
-            LocalDubMediaResult(remuxedVideo, media.durationMs)
+            LocalDubMediaResult(remuxedVideo, TimelinePlacementPolicy.outputDurationMs(media.durationMs, dub.segments))
         } finally {
             if (!success) root.deleteRecursively()
         }
@@ -317,7 +320,7 @@ object TimelineMixService {
             }
 
             val activeEncoder = encoder ?: error("The source audio decoder produced no PCM output.")
-            val mediaEndUs = media.durationMs * 1_000L
+            val mediaEndUs = TimelinePlacementPolicy.outputDurationMs(media.durationMs, dub.segments) * 1_000L
             if (timelineCursorUs < mediaEndUs) {
                 queueSilenceRange(
                     encoder = activeEncoder,

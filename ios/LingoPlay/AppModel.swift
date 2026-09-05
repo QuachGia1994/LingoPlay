@@ -238,7 +238,7 @@ final class AppModel {
         config: ProcessingConfig,
         preparedAudioURL: URL?
     ) {
-        cancelActiveProcessing()
+        let previousTask = cancelActiveProcessing()
         let run = ProcessingRun(id: UUID(), media: media, config: config)
         activeProcessingRunID = run.id
         processingTask = Task { [weak self] in
@@ -249,6 +249,8 @@ final class AppModel {
                     activeProcessingRunID = nil
                 }
             }
+            await previousTask?.value
+            guard isActive(run) else { return }
             try? await processingRecoveryStore.save(
                 media: run.media,
                 preparedAudioURL: preparedAudioURL,
@@ -266,9 +268,10 @@ final class AppModel {
 
     @discardableResult
     private func cancelActiveProcessing() -> Task<Void, Never>? {
+        recoveryRefreshID = UUID()
         let task = processingTask
         task?.cancel()
-        processingTask = nil
+        // Keep the cancelled task owned until native work returns; replacement awaits it.
         activeProcessingRunID = nil
         return task
     }
@@ -507,7 +510,7 @@ final class AppModel {
         guard let recovery = pendingRecovery else { return }
         Task { await diagnostics.record("recovery_resumed") }
         selectedMedia = recovery.media
-        let config = recovery.config ?? currentProcessingConfig()
+        let config = (recovery.config ?? currentProcessingConfig()).resuming(currentCloningConsent: voiceCloningEnabled)
         activeProcessingConfig = config
         processingProgress = recovery.canResumeFromAudio ? 0.2 : 0
         asrState = .idle
@@ -746,6 +749,8 @@ final class AppModel {
         await diagnostics.recent().count
     }
 
+    private var recoveryRefreshID = UUID()
+
     func returnHome() {
         let previousStage = stage
         let mediaToRelease = selectedMedia
@@ -764,10 +769,13 @@ final class AppModel {
         }
         selectedTab = .home
         if previousStage == .processing {
+            let refreshID = recoveryRefreshID
             Task { [weak self] in
                 await cancelledProcessingTask?.value
                 guard let self else { return }
-                pendingRecovery = await processingRecoveryStore.load()
+                let recovery = await processingRecoveryStore.load()
+                guard recoveryRefreshID == refreshID, stage == .home else { return }
+                pendingRecovery = recovery
             }
         }
         stage = .home

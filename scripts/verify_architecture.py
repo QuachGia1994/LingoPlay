@@ -307,4 +307,20 @@ bundled_voice_models = [
 ]
 require(not bundled_voice_models, "optional neural voice pack is not bundled in app source")
 
+# Stage 19.2 wiring checks supplement behavioral JVM/XCTest/device regressions.
+android_cloning_audit = (ROOT / "android/app/src/main/java/com/lingoplay/app/VoiceCloning.kt").read_text(encoding="utf-8")
+ios_cloning_audit = (ROOT / "ios/LingoPlay/VoiceCloning.swift").read_text(encoding="utf-8")
+ios_tts_audit = (ROOT / "ios/LingoPlay/NeuralTextToSpeech.swift").read_text(encoding="utf-8")
+require(".resuming(voiceCloningEnabled)" in android_root, "Android Resume revalidates current cloning consent")
+require(".resuming(currentCloningConsent: voiceCloningEnabled)" in ios_model, "iOS Resume revalidates current cloning consent")
+require("supportsPair(document.sourceLanguage, document.targetLanguage)" in android_cloning_audit, "Android native cloning gates reference and output languages")
+require("supportsPair(source: document.sourceLanguage, target: document.targetLanguage)" in ios_cloning_audit, "iOS native cloning gates reference and output languages")
+require("allSamples" not in android_cloning_audit and "allSamples" not in ios_cloning_audit, "Cloning builders do not retain whole-file PCM")
+require("TTSCachePolicy.synthesizeInSession" in android_cloning_audit and "TTSCachePolicy.synthesizeInSession" in android_neural_runtime, "Android native output remains owned across dispatcher cancellation")
+require(ios_tts_audit.count('DubSpeechDocument(voiceIdentifier: "partial", segments: output)') == 2, "iOS hybrid and regular group failures clean earlier output")
+require("await previousTask?.value" in ios_model, "iOS replacement processing waits for old native lifetime")
+require("recoveryRefreshID == refreshID" in ios_model, "iOS delayed recovery refresh rejects a replacement run")
+require((ROOT / "ios/LingoPlayTests/Stage19RuntimeTests.swift").is_file(), "iOS Stage 19 window, cancellation and remux regressions exist")
+require("stage6-source.mp4" in project_spec, "iOS tests use the shared real media fixture")
+
 print("Architecture verification PASSED")

@@ -71,6 +71,7 @@ actor ProcessingRecoveryStore {
         config: ProcessingConfig? = nil,
         processingRunID: UUID? = nil
     ) throws {
+        try Task.checkCancellation()
         guard fileManager.fileExists(atPath: media.localURL.path) else { return }
         let record = Record(
             mediaID: media.id,
@@ -95,6 +96,7 @@ actor ProcessingRecoveryStore {
         let data = try JSONEncoder().encode(record)
         let file = try checkpointFile()
         try fileManager.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Task.checkCancellation()
         try data.write(to: file, options: .atomic)
     }
 

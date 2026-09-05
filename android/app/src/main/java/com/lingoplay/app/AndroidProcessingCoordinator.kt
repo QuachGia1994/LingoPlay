@@ -2,6 +2,8 @@ package com.lingoplay.app
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.io.File
 
 internal enum class ProcessingFailureStep {
@@ -222,16 +224,16 @@ internal class AndroidProcessingCoordinator(
         val cloneReferences = if (
             resolvedConfig.speakerMode == SpeakerMode.MULTI &&
             resolvedConfig.voiceCloningEnabled &&
-            VoiceCloningPolicy.supportsTarget(resolvedConfig.targetLanguage.code)
+            VoiceCloningPolicy.supportsPair(annotatedTranscript.language, resolvedConfig.targetLanguage.code) &&
+            VoiceCloningPolicy.eligibleReferenceSegments(annotatedTranscript).isNotEmpty()
         ) {
             if (!runtime.voiceCloningModelInstalled()) return ProcessingOutcome.CloningModelMissing
-            runtime.buildVoiceCloneReferences(audioFile, annotatedTranscript).also { references ->
-                if (references.isEmpty()) {
-                    return ProcessingOutcome.Failed(
-                        ProcessingFailureStep.TTS,
-                        "Voice Cloning needs at least one clear 1.5–15 second single-speaker reference segment.",
-                    )
-                }
+            try {
+                runtime.buildVoiceCloneReferences(audioFile, annotatedTranscript)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                throw ProcessingStepException(ProcessingFailureStep.TTS, error.message ?: "Voice reference preparation failed.", error)
             }
         } else {
             emptyMap()
@@ -272,6 +274,7 @@ internal class AndroidProcessingCoordinator(
         return try {
             onEvent(ProcessingEvent.ExtractingAudio)
             runtime.extractAudio(media).also { file ->
+                currentCoroutineContext().ensureActive()
                 runtime.saveCheckpoint(media, file, config)
                 onEvent(ProcessingEvent.AudioReady(file))
             }
@@ -329,6 +332,7 @@ internal class AndroidProcessingCoordinator(
         return try {
             onEvent(ProcessingEvent.DiarizationStarted)
             val diarization = runtime.diarize(audioFile, model)
+            currentCoroutineContext().ensureActive()
             onEvent(ProcessingEvent.DiarizationReady(diarization))
             val annotated = SpeakerDiarizationPolicy.annotate(transcript, diarization)
             val mapping = SpeakerVoicePolicy.resolve(
@@ -339,6 +343,7 @@ internal class AndroidProcessingCoordinator(
                 existing = config.speakerVoiceMap,
             )
             val resolved = config.copy(speakerVoiceMap = mapping)
+            currentCoroutineContext().ensureActive()
             runtime.saveCheckpoint(media, audioFile, resolved)
             SpeakerResolution(annotated, resolved)
         } catch (cancelled: CancellationException) {
@@ -398,8 +403,14 @@ internal class AndroidProcessingCoordinator(
         ) { segment, total ->
             onEvent(ProcessingEvent.TtsProgress(segment, total))
         }
-        onEvent(ProcessingEvent.TtsReady(document))
-        DubOutcome(document, voiceMissing = false)
+        try {
+            currentCoroutineContext().ensureActive()
+            onEvent(ProcessingEvent.TtsReady(document))
+            DubOutcome(document, voiceMissing = false)
+        } catch (error: Throwable) {
+            TTSCachePolicy.cleanup(document)
+            throw error
+        }
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: OfflineTargetVoiceMissingException) {
@@ -420,6 +431,7 @@ internal class AndroidProcessingCoordinator(
         val rendered = runtime.render(media, dub, config.dubbingMode) { phase ->
             onEvent(ProcessingEvent.MixChanged(phase))
         }
+        currentCoroutineContext().ensureActive()
         val saved = runtime.save(media, rendered, translation, config.dubbingMode)
         runtime.clearCheckpoint()
         runtime.record("processing_completed")

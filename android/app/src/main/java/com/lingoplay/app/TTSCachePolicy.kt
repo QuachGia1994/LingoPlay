@@ -2,9 +2,28 @@ package com.lingoplay.app
 
 import android.content.Context
 import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 internal object TTSCachePolicy {
     private val cacheFamilies = setOf("tts", "neural-tts", "clone-tts")
+
+    suspend fun <T> synthesizeInSession(
+        context: Context,
+        family: String,
+        block: suspend (File) -> T,
+    ): T {
+        require(family in cacheFamilies)
+        val root = File(context.cacheDir, "lingoplay/$family/${UUID.randomUUID()}").apply { mkdirs() }
+        // Own the directory outside withContext: cancellation may discard its return value.
+        try {
+            return withContext(Dispatchers.Default) { block(root) }
+        } catch (error: Throwable) {
+            root.deleteRecursively()
+            throw error
+        }
+    }
 
     fun cleanup(document: DubSpeechDocument) {
         sessionDirectories(document).forEach(File::deleteRecursively)

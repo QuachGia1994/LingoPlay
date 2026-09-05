@@ -12,6 +12,8 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
@@ -272,6 +274,7 @@ internal object AndroidAudioDecoder {
             var chunker = MonoChunker(sampleRate, chunkSeconds, consume)
 
             while (!outputEnded) {
+                currentCoroutineContext().ensureActive()
                 if (!inputEnded) {
                     val inputIndex = decoder.dequeueInputBuffer(10_000)
                     if (inputIndex >= 0) {

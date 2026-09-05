@@ -23,7 +23,12 @@ enum VoiceCloningPolicy {
         return supportedLanguages.contains(base)
     }
 
+    static func supportsPair(source: String, target: String) -> Bool {
+        supportsTarget(source) && supportsTarget(target)
+    }
+
     static func eligibleReferenceSegments(_ transcript: ASRTranscript) -> [String: ASRSegment] {
+        guard supportsTarget(transcript.language) else { return [:] }
         var result: [String: ASRSegment] = [:]
         for segment in transcript.segments {
             guard let speakerID = segment.speakerID,
@@ -301,31 +306,20 @@ actor VoiceCloningModelInstaller {
 enum VoiceCloneReferenceBuilder {
     private static let referenceSampleRate = 24_000.0
 
-    static func build(audioURL: URL, transcript: ASRTranscript) throws -> [String: VoiceCloneReference] {
-        let selected = VoiceCloningPolicy.eligibleReferenceSegments(transcript)
-        guard !selected.isEmpty else { return [:] }
-        let allSamples = try SpeakerDiarizationService.decodeMono(
-            audioURL: audioURL,
-            sampleRate: referenceSampleRate,
-            maximumSeconds: SpeakerDiarizationService.maximumAudioSeconds
-        )
-        return selected.reduce(into: [String: VoiceCloneReference]()) { result, item in
-            let segment = item.value
-            let start = min(
-                allSamples.count,
-                max(0, Int((segment.start * referenceSampleRate).rounded()))
+    nonisolated static func build(audioURL: URL, transcript: ASRTranscript) async throws -> [String: VoiceCloneReference] {
+        var result: [String: VoiceCloneReference] = [:]
+        for (speaker, segment) in VoiceCloningPolicy.eligibleReferenceSegments(transcript) {
+            try Task.checkCancellation()
+            let samples = try SpeakerDiarizationService.decodeMono(
+                audioURL: audioURL, sampleRate: referenceSampleRate, maximumSeconds: 16,
+                startSeconds: segment.start, durationSeconds: segment.end - segment.start
             )
-            let end = min(
-                allSamples.count,
-                max(start + 1, Int((segment.end * referenceSampleRate).rounded()))
-            )
-            guard start < end else { return }
-            result[item.key] = VoiceCloneReference(
-                samples: Array(allSamples[start..<end]),
-                sampleRate: Int(referenceSampleRate),
-                referenceText: segment.text
+            guard Double(samples.count) / referenceSampleRate >= segment.end - segment.start - 0.05 else { continue }
+            result[speaker] = VoiceCloneReference(
+                samples: samples, sampleRate: Int(referenceSampleRate), referenceText: segment.text
             )
         }
+        return result
     }
 }
 
@@ -336,9 +330,10 @@ actor VoiceCloningTTSService {
         references: [String: VoiceCloneReference],
         progress: @MainActor @Sendable (Int, Int) -> Void
     ) async throws -> DubSpeechDocument {
-        guard VoiceCloningPolicy.supportsTarget(document.targetLanguage) else {
-            throw TTSError.synthesisFailed("Voice Cloning currently supports English and Chinese output only.")
+        guard VoiceCloningPolicy.supportsPair(source: document.sourceLanguage, target: document.targetLanguage) else {
+            throw TTSError.synthesisFailed("Voice Cloning requires English or Chinese reference speech and output.")
         }
+        try Task.checkCancellation()
         let zipvoice = sherpaOnnxOfflineTtsZipvoiceModelConfig(
             tokens: model.tokensURL.path,
             encoder: model.encoderURL.path,
@@ -376,6 +371,7 @@ actor VoiceCloningTTSService {
             output.append(try synthesizeSegment(segment, reference: reference, tts: tts, root: root))
             await progress(index + 1, document.segments.count)
         }
+        try Task.checkCancellation()
         succeeded = true
         return DubSpeechDocument(voiceIdentifier: "clone:zipvoice", segments: output)
     }
@@ -389,6 +385,7 @@ actor VoiceCloningTTSService {
         let targetMs = DurationFitPolicy.targetDurationMs(startMs: segment.startMs, endMs: segment.endMs)
         var multiplier: Float = 1
         for attempt in 0..<DurationFitPolicy.maximumAttempts {
+            try Task.checkCancellation()
             let fileURL = root.appendingPathComponent("\(segment.id)-\(attempt).wav")
             try? FileManager.default.removeItem(at: fileURL)
             let generation = SherpaOnnxGenerationConfigSwift(
@@ -405,6 +402,7 @@ actor VoiceCloningTTSService {
                 callback: nil,
                 arg: nil
             )
+            try Task.checkCancellation()
             guard audio.audio != nil, audio.n > 0, audio.sampleRate > 0 else {
                 throw TTSError.synthesisFailed("Voice Cloning produced no audio for segment \(segment.id).")
             }

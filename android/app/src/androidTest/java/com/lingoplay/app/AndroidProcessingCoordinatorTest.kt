@@ -1,6 +1,7 @@
 package com.lingoplay.app
 
 import android.net.Uri
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -118,9 +119,44 @@ class AndroidProcessingCoordinatorTest {
         }
     }
 
+    @Test
+    fun cancelledNativeReturnDeletesSessionBeforeCallerReceivesOutput() = runBlocking {
+        val target = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        var session: File? = null
+        val job = async {
+            TTSCachePolicy.synthesizeInSession(target, "clone-tts") { root ->
+                session = root
+                File(root, "partial.wav").writeBytes(byteArrayOf(1, 2, 3))
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.cancel()
+                "native result returned after cancellation"
+            }
+        }
+        try { job.await() } catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue("Native return must have allocated its session", session != null)
+        assertTrue("Dispatcher cancellation discarded output without cleanup", session?.exists() == false)
+    }
+
+    @Test
+    fun cancelledAudioResultCannotWriteCheckpoint() = runBlocking {
+        val root = createTempDirectory("lingoplay-cancelled-").toFile()
+        try {
+            val runtime = FakeRuntime(root, cancelAfterExtract = true)
+            val job = async {
+                AndroidProcessingCoordinator(runtime, true).run(
+                    LocalMediaItem(Uri.EMPTY, "sample.mp4", 2_000, 10, true), null,
+                    ProcessingConfig(SourceLanguageChoice.AUTO, TargetLanguageChoice.ENGLISH, null,
+                        DubbingModePreset.BALANCED, SubtitleMode.BILINGUAL),
+                ) { }
+            }
+            try { job.await() } catch (_: kotlinx.coroutines.CancellationException) { }
+            assertEquals(listOf("extract"), runtime.calls)
+        } finally { root.deleteRecursively() }
+    }
+
     private class FakeRuntime(
         private val root: File,
         private val modelFailure: Throwable? = null,
+        private val cancelAfterExtract: Boolean = false,
     ) : AndroidProcessingRuntime {
         val calls = mutableListOf<String>()
         private val audio = File(root, "audio.wav").apply { writeBytes(byteArrayOf(1)) }
@@ -132,6 +168,7 @@ class AndroidProcessingCoordinatorTest {
 
         override suspend fun extractAudio(media: LocalMediaItem): File {
             calls += "extract"
+            if (cancelAfterExtract) kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.cancel()
             return audio
         }
 

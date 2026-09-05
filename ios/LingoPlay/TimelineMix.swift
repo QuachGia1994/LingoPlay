@@ -129,7 +129,7 @@ final class TimelineMixService {
         let result = LocalDubMediaResult(
             dubbedAudioURL: dubbedAudioURL,
             remuxedVideoURL: remuxedVideoURL,
-            duration: media.duration
+            duration: try await AVURLAsset(url: remuxedVideoURL).load(.duration).seconds
         )
         success = true
         progress(.completed(result))
@@ -191,7 +191,7 @@ final class TimelineMixService {
             )
         }
         try outputDubTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: CMTimeMinimum(sourceDuration, dubDuration)),
+            CMTimeRange(start: .zero, duration: dubDuration),
             of: dubTrack,
             at: .zero
         )
@@ -325,7 +325,7 @@ final class TimelineMixService {
             )
         }
         try outputDubTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: CMTimeMinimum(sourceDuration, dubDuration)),
+            CMTimeRange(start: .zero, duration: dubDuration),
             of: dubTrack,
             at: .zero
         )
@@ -470,7 +470,7 @@ final class TimelineMixService {
         )
         outputVideoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
         try outputAudioTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: CMTimeMinimum(sourceDuration, mixedDuration)),
+            CMTimeRange(start: .zero, duration: mixedDuration),
             of: mixedTrack,
             at: .zero
         )

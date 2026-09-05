@@ -100,6 +100,30 @@ class SpeakerDiarizationDeviceTest {
             val output = dub.segments.single().audioFile
             generatedRoot = output.parentFile
             assertTrue("ZipVoice smoke output must be a non-empty WAV.", output.isFile && output.length() > 44L)
+            val families = listOf("tts", "neural-tts", "clone-tts").map { File(target.cacheDir, "lingoplay/$it") }
+            val before = families.flatMap { it.listFiles().orEmpty().toList() }.toSet()
+            var clonedGroupFinished = false
+            var failed = false
+            try {
+                HybridDubbingTTSService.synthesize(
+                    target,
+                    translation.copy(segments = translation.segments + TranslationSegment(
+                        "fallback", 8_000, 12_000, "Unknown speaker.", "Unknown speaker.",
+                    )),
+                    preferredVoiceId = null,
+                    speakerVoiceMap = emptyMap(),
+                    cloneReferences = references,
+                ) { done, _ ->
+                    if (done == 1) clonedGroupFinished = true
+                    if (done >= 2) error("Injected failure after the cloned group")
+                }
+            } catch (_: Exception) {
+                failed = true
+            }
+            assertTrue("The first clone group must have run before fallback failure", clonedGroupFinished)
+            assertTrue("Fallback must fail through the injected callback or missing system voice", failed)
+            val after = families.flatMap { it.listFiles().orEmpty().toList() }.toSet()
+            assertTrue("Hybrid failure leaked an earlier successful TTS group: " + (after - before), (after - before).isEmpty())
         } finally {
             generatedRoot?.deleteRecursively()
             fixture.delete()

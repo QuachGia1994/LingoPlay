@@ -78,6 +78,9 @@ data class ProcessingConfig(
     val voiceCloningEnabled: Boolean = false,
 )
 
+fun ProcessingConfig.resuming(currentCloningConsent: Boolean): ProcessingConfig =
+    copy(voiceCloningEnabled = voiceCloningEnabled && currentCloningConsent)
+
 data class ProcessingConfigRecord(
     val sourceLanguage: String,
     val targetLanguage: String,

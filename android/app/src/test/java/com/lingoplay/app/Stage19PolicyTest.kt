@@ -92,6 +92,35 @@ class Stage19PolicyTest {
     }
 
     @Test
+    fun briefSecondSpeakerCannotBecomeACloneReference() {
+        val document = SpeakerDiarizationDocument(
+            listOf(SpeakerTurn(0, 5_000, "speaker_1"), SpeakerTurn(2_000, 2_200, "speaker_2")),
+            listOf("speaker_1", "speaker_2"),
+        )
+        val result = SpeakerDiarizationPolicy.attribution(0, 5_000, document)
+        assertNull(result.speakerId)
+        assertEquals(setOf("speaker_1", "speaker_2"), result.overlappingSpeakerIds.toSet())
+    }
+
+    @Test
+    fun detectedUnsupportedSourceCannotSupplyCloneReferences() {
+        assertFalse(VoiceCloningPolicy.supportsPair("vi", "en"))
+        assertFalse(VoiceCloningPolicy.supportsPair("ja", "zh"))
+        assertTrue(VoiceCloningPolicy.supportsPair("en-US", "zh-Hans"))
+        val transcript = ASRTranscript("vi", "reference", listOf(
+            ASRSegment(0, 0f, 3f, "Vietnamese reference text", "speaker_1"),
+        ))
+        assertTrue(VoiceCloningPolicy.eligibleReferenceSegments(transcript).isEmpty())
+    }
+
+    @Test
+    fun outputDurationKeepsSpeechPastLastVideoFrame() {
+        val clip = DubSpeechSegment("tail", 2_900, 3_450, java.io.File("tail.wav"), 550, 0, 1f)
+        assertEquals(3_450L, TimelinePlacementPolicy.outputDurationMs(3_000, listOf(clip)))
+        assertEquals(5_000L, TimelinePlacementPolicy.outputDurationMs(5_000, listOf(clip)))
+    }
+
+    @Test
     fun processingConfigRoundTripPreservesStage19Snapshot() {
         val original = ProcessingConfig(
             sourceLanguage = SourceLanguageChoice.ENGLISH,
@@ -106,6 +135,11 @@ class Stage19PolicyTest {
         )
 
         assertEquals(original, original.toRecord().toConfig())
+        assertEquals(original, original.resuming(true))
+        val revoked = original.resuming(false)
+        assertFalse(revoked.voiceCloningEnabled)
+        assertEquals(original.speakerVoiceMap, revoked.speakerVoiceMap)
+        assertFalse(revoked.resuming(true).voiceCloningEnabled)
         val sanitized = original.toRecord().copy(
             speakerVoiceMap = original.speakerVoiceMap + ("not-a-speaker" to "bad"),
         ).toConfig()

@@ -127,6 +127,16 @@ struct ProcessingConfig: Sendable, Equatable {
     let speakerVoiceMap: [String: String]
     let voiceCloningEnabled: Bool
 
+    func resuming(currentCloningConsent: Bool) -> ProcessingConfig {
+        ProcessingConfig(
+            sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
+            preferredVoiceIdentifier: preferredVoiceIdentifier, dubbingMode: dubbingMode,
+            subtitleMode: subtitleMode, translationMode: translationMode,
+            speakerMode: speakerMode, speakerVoiceMap: speakerVoiceMap,
+            voiceCloningEnabled: voiceCloningEnabled && currentCloningConsent
+        )
+    }
+
     init(
         sourceLanguage: SourceLanguageChoice,
         targetLanguage: TargetLanguageChoice,

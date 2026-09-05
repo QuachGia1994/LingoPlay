@@ -70,14 +70,16 @@ extension AppModel {
         processingProgress = 0.48
 
         var cloneReferences: [String: VoiceCloneReference] = [:]
-        if resolvedConfig.voiceCloningEnabled && VoiceCloningPolicy.supportsTarget(resolvedConfig.targetLanguage.code) {
+        if resolvedConfig.voiceCloningEnabled,
+           VoiceCloningPolicy.supportsPair(source: annotated.language, target: resolvedConfig.targetLanguage.code),
+           !VoiceCloningPolicy.eligibleReferenceSegments(annotated).isEmpty {
             guard VoiceCloningModelStore().model() != nil else {
                 voiceCloningModelInstallState = .notInstalled
                 ttsState = .failed("Voice Cloning model required. Install the optional local model in Settings; cloning never falls back to cloud.")
                 return
             }
             do {
-                cloneReferences = try VoiceCloneReferenceBuilder.build(
+                cloneReferences = try await VoiceCloneReferenceBuilder.build(
                     audioURL: audioURL,
                     transcript: annotated
                 )
@@ -87,10 +89,7 @@ extension AppModel {
                 ttsState = .failed(error.localizedDescription)
                 return
             }
-            guard !cloneReferences.isEmpty else {
-                ttsState = .failed("Voice Cloning needs at least one clear 1.5–15 second single-speaker reference segment.")
-                return
-            }
+            // Unknown/mixed speech uses the selected offline voices when no safe reference exists.
         }
         await translateTranscript(annotated, cloneReferences: cloneReferences, run: resolvedRun)
     }

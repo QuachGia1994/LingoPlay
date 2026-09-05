@@ -43,7 +43,6 @@ struct SpeakerDiarizationDocument: Sendable, Equatable {
 enum SpeakerDiarizationPolicy {
     private static let minimumPrimaryOverlapMs = 120
     private static let overlapMinimumMs = 120
-    private static let overlapRatio = 0.35
 
     static func normalize(_ turns: [(start: Float, end: Float, speaker: Int)]) -> SpeakerDiarizationDocument {
         let valid = turns
@@ -90,8 +89,7 @@ enum SpeakerDiarizationPolicy {
             return SpeakerAttribution(speakerID: nil)
         }
         let overlapping = ranked.dropFirst().compactMap { item -> String? in
-            guard item.value >= overlapMinimumMs,
-                  Double(item.value) >= Double(primary.value) * overlapRatio
+            guard item.value >= overlapMinimumMs
             else { return nil }
             return item.key
         }
@@ -422,24 +420,8 @@ actor SpeakerDiarizationService {
         let raw = diarizer.process(samples: samples).map { segment in
             (start: segment.start, end: segment.end, speaker: Int(segment.speaker))
         }
+        try Task.checkCancellation()
         return SpeakerDiarizationPolicy.normalize(raw)
-    }
-
-    static func referenceSamples(
-        audioURL: URL,
-        startMs: Int,
-        endMs: Int,
-        sampleRate: Double = 16_000
-    ) throws -> (samples: [Float], sampleRate: Int32) {
-        let all = try decodeMono(
-            audioURL: audioURL,
-            sampleRate: sampleRate,
-            maximumSeconds: maximumAudioSeconds
-        )
-        let start = max(0, Int((Double(startMs) / 1_000 * sampleRate).rounded()))
-        let end = min(all.count, max(start + 1, Int((Double(endMs) / 1_000 * sampleRate).rounded())))
-        guard start < end else { return ([], Int32(sampleRate)) }
-        return (Array(all[start..<end]), Int32(sampleRate))
     }
 
     private static var threadCount: Int {
@@ -449,7 +431,9 @@ actor SpeakerDiarizationService {
     static func decodeMono(
         audioURL: URL,
         sampleRate: Double,
-        maximumSeconds: Int
+        maximumSeconds: Int,
+        startSeconds: Double = 0,
+        durationSeconds: Double? = nil
     ) throws -> [Float] {
         let file = try AVAudioFile(forReading: audioURL)
         let inputFormat = file.processingFormat
@@ -475,10 +459,14 @@ actor SpeakerDiarizationService {
             throw TTSError.invalidAudio
         }
 
-        while file.framePosition < file.length {
+        file.framePosition = min(file.length, AVAudioFramePosition(max(0, startSeconds) * inputFormat.sampleRate))
+        let endFrame = durationSeconds.map {
+            min(file.length, file.framePosition + AVAudioFramePosition($0 * inputFormat.sampleRate))
+        } ?? file.length
+        while file.framePosition < endFrame {
             try Task.checkCancellation()
             inputBuffer.frameLength = 0
-            try file.read(into: inputBuffer, frameCount: inputCapacity)
+            try file.read(into: inputBuffer, frameCount: AVAudioFrameCount(min(Int64(inputCapacity), endFrame - file.framePosition)))
             if inputBuffer.frameLength == 0 { break }
             let ratio = sampleRate / inputFormat.sampleRate
             let outputCapacity = AVAudioFrameCount(max(1, Int(ceil(Double(inputBuffer.frameLength) * ratio)) + 32))

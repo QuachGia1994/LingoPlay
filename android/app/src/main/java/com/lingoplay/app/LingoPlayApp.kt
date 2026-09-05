@@ -613,7 +613,7 @@ fun LingoPlayApp() {
                                 LocalDiagnostics.record(context, "recovery_resumed")
                                 selectedMedia = checkpoint.media
                                 preparedAudioFile = checkpoint.preparedAudioFile
-                                activeProcessingConfig = checkpoint.config ?: currentProcessingConfig
+                                activeProcessingConfig = (checkpoint.config ?: currentProcessingConfig).resuming(voiceCloningEnabled)
                                 mediaState = if (checkpoint.canResumeFromAudio) MediaPreparationState.AUDIO_READY.name else MediaPreparationState.READY.name
                                 mediaError = null
                                 asrPhaseName = ASRPhase.IDLE.name

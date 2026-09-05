@@ -5,10 +5,9 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.io.File
-import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -60,22 +59,27 @@ object OfflineDubbingTTSService {
             grouped.getOrPut(voiceId) { mutableListOf() } += segment
         }
         val output = mutableListOf<DubSpeechSegment>()
-        var completed = 0
-        for ((voiceId, segments) in grouped) {
-            val partial = synthesizeWithVoice(
-                context = context,
-                document = document.copy(segments = segments),
-                preferredVoiceId = voiceId,
-            ) { local, _ ->
-                onProgress(completed + local, document.segments.size)
+        try {
+            var completed = 0
+            for ((voiceId, segments) in grouped) {
+                val partial = synthesizeWithVoice(
+                    context = context,
+                    document = document.copy(segments = segments),
+                    preferredVoiceId = voiceId,
+                ) { local, _ ->
+                    onProgress(completed + local, document.segments.size)
+                }
+                output += partial.segments
+                completed += segments.size
             }
-            output += partial.segments
-            completed += segments.size
+            return DubSpeechDocument(
+                voiceName = "Multi-speaker · ${grouped.size} voice${if (grouped.size == 1) "" else "s"}",
+                segments = output.sortedBy { segment -> document.segments.indexOfFirst { it.id == segment.id } },
+            )
+        } catch (error: Throwable) {
+            TTSCachePolicy.cleanup(DubSpeechDocument("partial", output))
+            throw error
         }
-        return DubSpeechDocument(
-            voiceName = "Multi-speaker · ${grouped.size} voice${if (grouped.size == 1) "" else "s"}",
-            segments = output.sortedBy { segment -> document.segments.indexOfFirst { it.id == segment.id } },
-        )
     }
 
     private suspend fun synthesizeWithVoice(
@@ -114,7 +118,7 @@ object NeuralVietnameseTTSService {
         document: TranslationDocument,
         model: NeuralVoiceModel,
         onProgress: suspend (segment: Int, total: Int) -> Unit,
-    ): DubSpeechDocument = withContext(Dispatchers.Default) {
+    ): DubSpeechDocument = TTSCachePolicy.synthesizeInSession(context, "neural-tts") { root ->
         require(document.targetLanguage.substringBefore('-').equals("vi", ignoreCase = true)) {
             "The installed Neural Voice supports Vietnamese output only."
         }
@@ -133,7 +137,6 @@ object NeuralVietnameseTTSService {
             assetManager = null,
             config = OfflineTtsConfig(model = modelConfig, silenceScale = 0.2f),
         )
-        val root = File(context.cacheDir, "lingoplay/neural-tts/${UUID.randomUUID()}").apply { mkdirs() }
         var succeeded = false
         try {
             val output = mutableListOf<DubSpeechSegment>()
@@ -141,6 +144,7 @@ object NeuralVietnameseTTSService {
                 output += synthesizeSegment(tts, segment, root)
                 onProgress(index + 1, document.segments.size)
             }
+            currentCoroutineContext().ensureActive()
             succeeded = true
             DubSpeechDocument(NeuralVoicePackManifest.voiceId, output)
         } finally {
@@ -149,7 +153,7 @@ object NeuralVietnameseTTSService {
         }
     }
 
-    private fun synthesizeSegment(
+    private suspend fun synthesizeSegment(
         tts: OfflineTts,
         segment: TranslationSegment,
         root: File,
@@ -158,9 +162,11 @@ object NeuralVietnameseTTSService {
         var multiplier = 1.0f
 
         repeat(DurationFitPolicy.MAXIMUM_ATTEMPTS) { attempt ->
+            currentCoroutineContext().ensureActive()
             val output = File(root, "${segment.id}-$attempt.wav")
             output.delete()
             val audio = tts.generate(segment.translatedText, sid = 0, speed = multiplier)
+            currentCoroutineContext().ensureActive()
             check(audio.samples.isNotEmpty() && audio.sampleRate > 0) {
                 "Neural Voice produced no audio for segment ${segment.id}."
             }

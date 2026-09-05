@@ -313,6 +313,29 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(selected["speaker_1"]?.id, 1)
     }
 
+    func testBriefSecondSpeakerCannotBecomeCloneReference() {
+        let document = SpeakerDiarizationDocument(
+            turns: [
+                SpeakerTurn(startMs: 0, endMs: 5_000, speakerID: "speaker_1"),
+                SpeakerTurn(startMs: 2_000, endMs: 2_200, speakerID: "speaker_2"),
+            ],
+            speakerIDs: ["speaker_1", "speaker_2"]
+        )
+        let attribution = SpeakerDiarizationPolicy.attribution(startMs: 0, endMs: 5_000, document: document)
+        XCTAssertNil(attribution.speakerID)
+        XCTAssertEqual(Set(attribution.overlappingSpeakerIDs), Set(["speaker_1", "speaker_2"]))
+    }
+
+    func testCloningRejectsUnsupportedDetectedSource() {
+        XCTAssertFalse(VoiceCloningPolicy.supportsPair(source: "vi", target: "en"))
+        XCTAssertFalse(VoiceCloningPolicy.supportsPair(source: "ja", target: "zh"))
+        XCTAssertTrue(VoiceCloningPolicy.supportsPair(source: "en-US", target: "zh-Hans"))
+        let transcript = ASRTranscript(language: "vi", text: "reference", segments: [
+            ASRSegment(id: 0, start: 0, end: 3, text: "Vietnamese reference text", speakerID: "speaker_1"),
+        ])
+        XCTAssertTrue(VoiceCloningPolicy.eligibleReferenceSegments(transcript).isEmpty)
+    }
+
     func testStage19ProcessingConfigCarriesConsentAndSpeakerMap() {
         let config = ProcessingConfig(
             sourceLanguage: .en,
@@ -328,5 +351,10 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(config.speakerMode, .multi)
         XCTAssertEqual(config.speakerVoiceMap["speaker_2"], "zh-b")
         XCTAssertTrue(config.voiceCloningEnabled)
+        XCTAssertEqual(config.resuming(currentCloningConsent: true), config)
+        let revoked = config.resuming(currentCloningConsent: false)
+        XCTAssertFalse(revoked.voiceCloningEnabled)
+        XCTAssertEqual(revoked.speakerVoiceMap, config.speakerVoiceMap)
+        XCTAssertFalse(revoked.resuming(currentCloningConsent: true).voiceCloningEnabled)
     }
 }
