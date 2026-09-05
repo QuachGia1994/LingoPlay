@@ -23,8 +23,18 @@ def verify_ios_privacy() -> None:
         data = plistlib.load(handle)
     if data.get("NSPrivacyTracking") is not False:
         fail("iOS privacy manifest must declare NSPrivacyTracking=false")
-    if data.get("NSPrivacyCollectedDataTypes") != []:
-        fail("LingoPlay must not declare collected data while diagnostics remain local-only")
+    collected = data.get("NSPrivacyCollectedDataTypes", [])
+    if len(collected) != 1:
+        fail("iOS privacy manifest must declare exactly the Stage 21 purchase-history data type")
+    purchase = collected[0]
+    if purchase.get("NSPrivacyCollectedDataType") != "NSPrivacyCollectedDataTypePurchaseHistory":
+        fail("iOS privacy manifest must declare Purchase History for server entitlement verification")
+    if purchase.get("NSPrivacyCollectedDataTypeLinked") is not True:
+        fail("purchase history must be declared linked to the store account")
+    if purchase.get("NSPrivacyCollectedDataTypeTracking") is not False:
+        fail("purchase history must not be used for tracking")
+    if purchase.get("NSPrivacyCollectedDataTypePurposes") != ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]:
+        fail("purchase history must be limited to app functionality")
 
     expected = {
         "NSPrivacyAccessedAPICategoryUserDefaults": "CA92.1",

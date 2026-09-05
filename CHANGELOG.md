@@ -4,6 +4,10 @@ All notable changes to LingoPlay are documented here.
 
 ## [Unreleased]
 
+### Added
+- Stage 21 account-independent distribution hardening: the Worker now exposes fail-closed Apple App Store / Google Play subscription verification, iOS Release entitlement requires server confirmation while DEBUG Xcode StoreKit Testing remains local-only, and Android Play `PURCHASED` tokens must be server-verified before Plus unlock and acknowledgement.
+- Store-readiness documentation records the exact external blockers while Apple Developer/App Store Connect and Play Console accounts are unavailable, including future Worker secret names, products, signing, notifications, sandbox/license-tester and refund/revocation evidence.
+
 ### Fixed
 - Stage 20.1 Clean Background runtime integrity: Spleeter now processes bounded core windows with guard context and absolute-frame core cropping instead of hard-stitching independent 12-second outputs; Android also cleans a completed native separation result if coroutine cancellation lands before coordinator ownership transfers.
 - Clean Background preserves the original source-audio timeline origin when inserting separated accompaniment. Android reads the generated PCM16 accompaniment WAV directly instead of depending on an OEM `audio/raw` MediaCodec decoder.

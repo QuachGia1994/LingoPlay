@@ -100,6 +100,14 @@ require((ROOT / "android/app/src/main/cpp/CMakeLists.txt").is_file(), "Android S
 require((ROOT / "android/app/src/main/cpp/source_separation_jni.cpp").is_file(), "Android Stage 20 JNI bridge exists")
 require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/SourceSeparationDeviceTest.kt").is_file(), "Android Stage 20 physical separation regression exists")
 
+for relative in (
+    "android/app/src/main/java/com/lingoplay/app/PlusEntitlementService.kt",
+    "ios/LingoPlay/PlusEntitlementService.swift",
+    "ios/LingoPlay/PlusView.swift",
+    "backend/src/entitlements.ts",
+):
+    size_under(relative, 32_000)
+
 ios_model = (ROOT / "ios/LingoPlay/AppModel.swift").read_text(encoding="utf-8")
 ios_processing_run_path = ROOT / "ios/LingoPlay/ProcessingRun.swift"
 require(ios_processing_run_path.is_file(), "iOS processing run helper exists")

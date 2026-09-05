@@ -2,7 +2,6 @@ import AVFoundation
 import AVKit
 import CoreTransferable
 import PhotosUI
-import StoreKit
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -161,7 +160,7 @@ struct SettingsView: View {
                     Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
                         .font(.headline)
                         .foregroundStyle(LPTheme.accent)
-                    Text(model.uiText("Cloud mode sends transcript JSON only to LingoPlay. Offline mode keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Chế độ Cloud chỉ gửi transcript JSON tới LingoPlay. Chế độ Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."))
+                    Text(model.uiText("Video/audio stay on-device. Cloud translation sends transcript JSON only; Plus verification sends only the Store transaction identifier to LingoPlay. Offline translation keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Video/audio luôn ở trên thiết bị. Dịch Cloud chỉ gửi transcript JSON; xác minh Plus chỉ gửi mã giao dịch Store tới LingoPlay. Dịch Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."))
                         .font(.subheadline)
                         .foregroundStyle(LPTheme.secondaryText)
                 }
@@ -211,115 +210,6 @@ struct SettingsView: View {
     }
 }
 
-struct PlusView: View {
-    @Bindable var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    VStack(spacing: 10) {
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 38, weight: .bold))
-                            .foregroundStyle(LPTheme.accent)
-                        Text("LingoPlay Plus")
-                            .font(.largeTitle.bold())
-                        Text(model.uiText("StoreKit 2 is pre-wired for local testing. Current pre-release capabilities remain available while billing is being validated.", "StoreKit 2 đã được đấu sẵn để test cục bộ. Các tính năng pre-release hiện tại vẫn dùng được trong lúc kiểm thử thanh toán."))
-                            .font(.subheadline)
-                            .foregroundStyle(LPTheme.secondaryText)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    if model.plusStore.isPlus {
-                        Label(model.uiText("Plus active on this StoreKit account", "Plus đang hoạt động trên tài khoản StoreKit này"), systemImage: "checkmark.seal.fill")
-                            .font(.headline)
-                            .foregroundStyle(LPTheme.cyan)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .lpCard()
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label(model.uiText("Planned Plus capabilities", "Tính năng Plus dự kiến"), systemImage: "sparkles")
-                            .font(.headline)
-                            .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Clean Background requires an explicit verified-model install; cross-device quality certification remains pending.", "Tách nền sạch cần chủ động cài model đã xác minh; kiểm định chất lượng đa thiết bị vẫn đang chờ."))
-                            .font(.subheadline)
-                            .foregroundStyle(LPTheme.secondaryText)
-                    }
-                    .lpCard()
-
-                    if model.plusStore.products.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(model.uiText("Products unavailable", "Chưa có sản phẩm"))
-                                .font(.headline)
-                            Text(model.plusStore.statusMessage ?? model.uiText("Run the app from Xcode with Products.storekit selected in the Run scheme to test purchases locally without App Store Connect.", "Chạy app từ Xcode với Products.storekit được chọn trong Run scheme để test mua hàng cục bộ mà không cần App Store Connect."))
-                                .font(.caption)
-                                .foregroundStyle(LPTheme.secondaryText)
-                            Button(model.uiText("Reload products", "Tải lại sản phẩm")) {
-                                Task { await model.plusStore.refresh() }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .lpCard()
-                    } else {
-                        ForEach(model.plusStore.products, id: \.id) { product in
-                            Button {
-                                Task { await model.plusStore.purchase(product) }
-                            } label: {
-                                HStack(spacing: 14) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(product.displayName)
-                                            .font(.headline)
-                                        Text(product.description)
-                                            .font(.caption)
-                                            .foregroundStyle(LPTheme.secondaryText)
-                                    }
-                                    Spacer()
-                                    Text(product.displayPrice)
-                                        .font(.headline)
-                                        .foregroundStyle(LPTheme.cyan)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(model.plusStore.purchaseState == .purchasing || model.plusStore.purchaseState == .restoring)
-                            .lpCard()
-                        }
-                    }
-
-                    if let message = model.plusStore.statusMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(LPTheme.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button(model.uiText("Restore Purchases", "Khôi phục giao dịch")) {
-                        Task { await model.plusStore.restore() }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.plusStore.purchaseState == .purchasing || model.plusStore.purchaseState == .restoring)
-
-                    Text(model.uiText("Development note: these local StoreKit products are not synced to App Store Connect. Use the same product IDs later when an Apple Developer account is available.", "Ghi chú phát triển: các sản phẩm StoreKit cục bộ này chưa đồng bộ App Store Connect. Sau này khi có Apple Developer account, tạo sản phẩm với đúng các Product ID này."))
-                        .font(.caption2)
-                        .foregroundStyle(LPTheme.secondaryText)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(18)
-            }
-            .navigationTitle("Plus")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(model.uiText("Done", "Xong")) { dismiss() }
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-}
-
 struct AboutView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -340,7 +230,7 @@ struct AboutView: View {
                         Label(model.uiText("Private by architecture", "Riêng tư ngay từ kiến trúc"), systemImage: "lock.shield.fill")
                             .font(.headline)
                             .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Video/audio stay on-device. Only transcript JSON is eligible for Cloud translation requests.", "Video/audio luôn ở trên thiết bị. Chỉ transcript JSON có thể được gửi khi dịch Cloud."))
+                        Text(model.uiText("Video/audio stay on-device. Cloud translation may send transcript JSON; Plus verification may send only the Store transaction identifier to LingoPlay.", "Video/audio luôn ở trên thiết bị. Dịch Cloud có thể gửi transcript JSON; xác minh Plus chỉ có thể gửi mã giao dịch Store tới LingoPlay."))
                             .font(.subheadline)
                             .foregroundStyle(LPTheme.secondaryText)
                         Text(model.uiText("Offline translation input/output stays on-device. ML Kit may contact Google for models, updates, and performance/utilization metrics.", "Nội dung vào/ra của dịch Offline ở lại trên thiết bị. ML Kit có thể kết nối Google để tải model, cập nhật và gửi chỉ số hiệu năng/mức sử dụng."))

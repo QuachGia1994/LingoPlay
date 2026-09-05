@@ -239,7 +239,7 @@ internal fun SettingsScreen(
                 Icon(Icons.Rounded.Lock, contentDescription = null, tint = LpCyan)
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(language.text("Private by architecture", "Riêng tư ngay từ kiến trúc"), fontWeight = FontWeight.Bold)
-                    Text(language.text("Cloud mode sends transcript JSON only to LingoPlay. Offline mode keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Chế độ Cloud chỉ gửi transcript JSON tới LingoPlay. Chế độ Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."), color = LpSecondaryText, fontSize = 13.sp)
+                    Text(language.text("Video/audio stay on-device. Cloud translation sends transcript JSON only; Plus verification sends only the Google Play purchase token to LingoPlay. Offline translation keeps transcript text on-device; ML Kit may contact Google for model downloads, updates, and performance/utilization metrics.", "Video/audio luôn ở trên thiết bị. Dịch Cloud chỉ gửi transcript JSON; xác minh Plus chỉ gửi purchase token Google Play tới LingoPlay. Dịch Offline giữ transcript trên thiết bị; ML Kit có thể kết nối Google để tải/cập nhật model và gửi chỉ số hiệu năng/mức sử dụng."), color = LpSecondaryText, fontSize = 13.sp)
                 }
             }
         }
@@ -449,8 +449,8 @@ internal fun PlusScreen(language: UiLanguage, store: AndroidPlusStore, onBack: (
             )
             Text(
                 language.text(
-                    "Google Play Billing 9.1 is wired for weekly/monthly subscriptions. Pending purchases never unlock Plus.",
-                    "Google Play Billing 9.1 đã được nối cho gói tuần/tháng. Giao dịch đang chờ không mở khóa Plus.",
+                    "Google Play Billing 9.1 handles the purchase UI, but Production Plus unlocks only after the LingoPlay server verifies the purchase token. Pending or unverifiable purchases stay locked.",
+                    "Google Play Billing 9.1 xử lý giao diện mua, nhưng Plus production chỉ mở sau khi server LingoPlay xác minh purchase token. Giao dịch đang chờ hoặc chưa xác minh vẫn bị khóa.",
                 ),
                 color = LpSecondaryText,
                 fontSize = 12.sp,
@@ -481,8 +481,8 @@ internal fun PlusScreen(language: UiLanguage, store: AndroidPlusStore, onBack: (
                 Text(language.text("Products unavailable", "Chưa có sản phẩm"), fontWeight = FontWeight.Bold)
                 Text(
                     store.message ?: language.text(
-                        "This build/account has no matching Play Console subscription products yet.",
-                        "Build/tài khoản này chưa có subscription tương ứng trên Play Console.",
+                        "No matching Play Console subscription products are available yet. Production billing also requires server-side Google Play credentials.",
+                        "Chưa có subscription tương ứng trên Play Console. Thanh toán production cũng cần thông tin xác minh Google Play ở phía server.",
                     ),
                     color = LpSecondaryText,
                     fontSize = 12.sp,
@@ -511,7 +511,7 @@ internal fun AboutScreen(
             Text(language.text("Private local-media dubbing", "Lồng tiếng media cục bộ riêng tư"), color = LpSecondaryText)
             CardDivider()
             Text(language.text("Media boundary", "Biên media"), fontWeight = FontWeight.Bold)
-            Text(language.text("Video/audio stay on-device; only transcript JSON is eligible for translation requests.", "Video/audio luôn trên thiết bị; chỉ transcript JSON có thể được gửi để dịch."), color = LpSecondaryText, fontSize = 12.sp)
+            Text(language.text("Video/audio stay on-device. Cloud translation may send transcript JSON; Plus verification may send only the Google Play purchase token to LingoPlay.", "Video/audio luôn trên thiết bị. Dịch Cloud có thể gửi transcript JSON; xác minh Plus chỉ có thể gửi purchase token Google Play tới LingoPlay."), color = LpSecondaryText, fontSize = 12.sp)
             CardDivider()
             Text("Clean Background: ${if (cleanBackgroundAvailable) "Ready" else "Unavailable"}", fontSize = 12.sp)
             Text(language.text("Local diagnostic events: $diagnosticsCount", "Sự kiện chẩn đoán cục bộ: $diagnosticsCount"), fontSize = 12.sp)

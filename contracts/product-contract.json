@@ -24,7 +24,16 @@
   },
   "plus": {
     "weeklyProductId": "com.lingoplay.plus.weekly",
-    "monthlyProductId": "com.lingoplay.plus.monthly"
+    "monthlyProductId": "com.lingoplay.plus.monthly",
+    "productionAuthority": "server",
+    "verificationPath": "/v1/entitlements/verify",
+    "iosLocalTestingAuthority": "xcode-debug-only",
+    "releaseFailsClosedWithoutServerVerification": true,
+    "googleActiveStates": [
+      "SUBSCRIPTION_STATE_ACTIVE",
+      "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+      "SUBSCRIPTION_STATE_CANCELED"
+    ]
   },
   "offlineNeuralVoice": {
     "id": "neural:vi-vais1000-medium",

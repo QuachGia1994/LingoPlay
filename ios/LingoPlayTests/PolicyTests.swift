@@ -401,4 +401,37 @@ final class PolicyTests: XCTestCase {
         XCTAssertNil(SourceSeparationArchivePolicy.relativePath(for: "\(root)/../escape.onnx"))
         XCTAssertNil(SourceSeparationArchivePolicy.relativePath(for: "\(root)/subdir/model.onnx"))
     }
+
+    func testStage21ServerEntitlementRequiresServerAuthorityAndActiveReason() {
+        XCTAssertTrue(
+            PlusServerEntitlement(
+                plan: "plus",
+                authority: "server",
+                platform: "apple",
+                productId: PlusStore.monthlyID,
+                expiresAt: "2026-10-01T00:00:00Z",
+                reason: "active"
+            ).isPlus
+        )
+        XCTAssertFalse(
+            PlusServerEntitlement(
+                plan: "plus",
+                authority: "client",
+                platform: "apple",
+                productId: PlusStore.monthlyID,
+                expiresAt: "2026-10-01T00:00:00Z",
+                reason: "active"
+            ).isPlus
+        )
+        XCTAssertFalse(
+            PlusServerEntitlement(
+                plan: "free",
+                authority: "server",
+                platform: "apple",
+                productId: PlusStore.monthlyID,
+                expiresAt: "2026-10-01T00:00:00Z",
+                reason: "revoked"
+            ).isPlus
+        )
+    }
 }

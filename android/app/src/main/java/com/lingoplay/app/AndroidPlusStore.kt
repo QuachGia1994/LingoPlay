@@ -18,6 +18,11 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 
 enum class AndroidPlusPhase {
@@ -25,6 +30,7 @@ enum class AndroidPlusPhase {
     CONNECTING,
     LOADING_PRODUCTS,
     PURCHASING,
+    VERIFYING,
     PENDING,
     ACTIVE,
     UNAVAILABLE,
@@ -73,6 +79,8 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
     private var connecting = false
     private var shouldStayConnected = false
     private val acknowledgementGate = PurchaseAcknowledgementGate()
+    private val verificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var verificationGeneration = 0L
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectAction = Runnable { if (shouldStayConnected) start() }
 
@@ -124,6 +132,8 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
         connecting = false
         reconnectHandler.removeCallbacks(reconnectAction)
         acknowledgementGate.clear()
+        verificationGeneration++
+        verificationScope.cancel()
         billingClient.endConnection()
     }
 
@@ -139,6 +149,7 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
     fun restore() = refresh()
 
     fun purchase(activity: Activity, product: AndroidPlusProduct) {
+        if (phase == AndroidPlusPhase.PURCHASING || phase == AndroidPlusPhase.VERIFYING) return
         if (!billingClient.isReady) {
             start()
             return
@@ -201,6 +212,7 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
                     offerToken = offer.offerToken,
                 )
             }.sortedBy { productIds.indexOf(it.productId) }
+            if (phase == AndroidPlusPhase.VERIFYING) return@queryProductDetailsAsync
             if (isPlus) {
                 phase = AndroidPlusPhase.ACTIVE
                 message = null
@@ -241,26 +253,82 @@ class AndroidPlusStore(context: Context) : PurchasesUpdatedListener {
         val relevant = purchases.filter { purchase -> purchase.products.any(productIds::contains) }
         val purchased = relevant.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
         val pending = relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING }
-        isPlus = purchased.isNotEmpty()
-        phase = when {
-            isPlus -> AndroidPlusPhase.ACTIVE
-            pending -> AndroidPlusPhase.PENDING
-            products.isEmpty() -> AndroidPlusPhase.UNAVAILABLE
-            else -> AndroidPlusPhase.IDLE
-        }
-        message = if (pending && !isPlus) "Purchase pending in Google Play. Plus unlocks only after payment completes." else null
+        val generation = ++verificationGeneration
 
-        purchased.forEach { purchase ->
-            val token = purchase.purchaseToken
-            if (!acknowledgementGate.tryBegin(token, purchase.isAcknowledged)) return@forEach
-            val params = AcknowledgePurchaseParams.newBuilder()
-                .setPurchaseToken(token)
-                .build()
-            billingClient.acknowledgePurchase(params) { result ->
-                acknowledgementGate.finish(token)
-                if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                    message = "Plus is active locally, but Google Play acknowledgement will be retried on next refresh."
+        if (purchased.isEmpty()) {
+            isPlus = false
+            phase = when {
+                pending -> AndroidPlusPhase.PENDING
+                products.isEmpty() -> AndroidPlusPhase.UNAVAILABLE
+                else -> AndroidPlusPhase.IDLE
+            }
+            message = if (pending) {
+                "Purchase pending in Google Play. Plus unlocks only after payment completes and server verification succeeds."
+            } else {
+                null
+            }
+            return
+        }
+
+        isPlus = false
+        phase = AndroidPlusPhase.VERIFYING
+        message = "Verifying Google Play subscription with the LingoPlay server…"
+        verificationScope.launch {
+            var activePurchase: Purchase? = null
+            var inactiveReason: String? = null
+            var verificationError: String? = null
+
+            for (purchase in purchased) {
+                if (generation != verificationGeneration || !shouldStayConnected) return@launch
+                try {
+                    val entitlement = PlusEntitlementService.verifyGoogle(purchase.purchaseToken)
+                    val productMatches = entitlement.productId == null || purchase.products.contains(entitlement.productId)
+                    if (entitlement.isPlus && productMatches) {
+                        activePurchase = purchase
+                        break
+                    }
+                    inactiveReason = entitlement.reason
+                } catch (error: Exception) {
+                    verificationError = error.message ?: "Billing verification failed."
                 }
+            }
+
+            if (generation != verificationGeneration || !shouldStayConnected) return@launch
+            val verifiedPurchase = activePurchase
+            if (verifiedPurchase != null) {
+                isPlus = true
+                phase = AndroidPlusPhase.ACTIVE
+                message = null
+                acknowledgeVerifiedPurchase(verifiedPurchase)
+                return@launch
+            }
+
+            isPlus = false
+            phase = when {
+                verificationError != null -> AndroidPlusPhase.FAILED
+                pending -> AndroidPlusPhase.PENDING
+                products.isEmpty() -> AndroidPlusPhase.UNAVAILABLE
+                else -> AndroidPlusPhase.IDLE
+            }
+            message = when {
+                verificationError != null -> "Plus stays locked until server verification succeeds: $verificationError"
+                pending -> "Purchase pending in Google Play. Plus unlocks only after payment completes and server verification succeeds."
+                inactiveReason != null -> "Server verification reports no active Plus subscription ($inactiveReason)."
+                else -> "No active Plus subscription was verified."
+            }
+        }
+    }
+
+    private fun acknowledgeVerifiedPurchase(purchase: Purchase) {
+        val token = purchase.purchaseToken
+        if (!acknowledgementGate.tryBegin(token, purchase.isAcknowledged)) return
+        val params = AcknowledgePurchaseParams.newBuilder()
+            .setPurchaseToken(token)
+            .build()
+        billingClient.acknowledgePurchase(params) { result ->
+            acknowledgementGate.finish(token)
+            if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                message = "Plus is server-verified, but Google Play acknowledgement will be retried on next refresh."
             }
         }
     }

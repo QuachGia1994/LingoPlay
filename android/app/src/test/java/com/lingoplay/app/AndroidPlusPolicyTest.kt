@@ -21,4 +21,38 @@ class AndroidPlusPolicyTest {
         val gate = PurchaseAcknowledgementGate()
         assertFalse(gate.tryBegin("purchase-token", alreadyAcknowledged = true))
     }
+
+    @Test
+    fun plusEntitlementRequiresServerAuthorityAndActiveReason() {
+        assertTrue(
+            AndroidPlusServerEntitlement(
+                plan = "plus",
+                authority = "server",
+                platform = "google",
+                productId = AndroidPlusStore.MONTHLY_ID,
+                expiresAt = "2026-10-01T00:00:00Z",
+                reason = "active",
+            ).isPlus,
+        )
+        assertFalse(
+            AndroidPlusServerEntitlement(
+                plan = "plus",
+                authority = "client",
+                platform = "google",
+                productId = AndroidPlusStore.MONTHLY_ID,
+                expiresAt = "2026-10-01T00:00:00Z",
+                reason = "active",
+            ).isPlus,
+        )
+        assertFalse(
+            AndroidPlusServerEntitlement(
+                plan = "free",
+                authority = "server",
+                platform = "google",
+                productId = AndroidPlusStore.MONTHLY_ID,
+                expiresAt = "2026-10-01T00:00:00Z",
+                reason = "revoked",
+            ).isPlus,
+        )
+    }
 }

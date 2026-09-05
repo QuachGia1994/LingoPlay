@@ -1,3 +1,11 @@
+import {
+  BillingConfigurationError,
+  BillingProviderError,
+  type BillingEnv,
+  validateEntitlementVerificationPayload,
+  verifyEntitlement,
+} from "./entitlements.ts";
+
 export interface WorkersAITranslationInput {
   text: string;
   source_lang: string;
@@ -8,7 +16,7 @@ export interface WorkersAI {
   run(model: string, input: WorkersAITranslationInput): Promise<unknown>;
 }
 
-export interface Env {
+export interface Env extends BillingEnv {
   AI?: WorkersAI;
   // Legacy provider proxy remains supported for self-hosted deployments.
   TRANSLATION_PROVIDER_URL?: string;
@@ -278,6 +286,7 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
   if (request.method === "GET" && url.pathname === "/v1/entitlements") {
     return json({
       plan: "free",
+      authority: "server",
       capabilities: {
         localImport: true,
         basicVietnameseVoice: true,
@@ -288,6 +297,24 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
         smartSpeed: false,
       },
     });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/entitlements/verify") {
+    const parsed = await parseJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    const validated = validateEntitlementVerificationPayload(parsed.value);
+    if (!validated.ok) return json({ error: validated.error }, 400);
+    try {
+      return json(await verifyEntitlement(validated.data, env));
+    } catch (error) {
+      if (error instanceof BillingConfigurationError) {
+        return json({ error: error.message }, 503);
+      }
+      if (error instanceof BillingProviderError) {
+        return json({ error: error.message }, 502);
+      }
+      return json({ error: "billing_verification_failed" }, 502);
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/v1/translate") return translate(request, env);
