@@ -348,11 +348,11 @@ actor VoiceCloningTTSService {
             lexicon: model.lexiconURL.path
         )
         let modelConfig = sherpaOnnxOfflineTtsModelConfig(
-            zipvoice: zipvoice,
             numThreads: NeuralTTSPerformancePolicy.threadCount(
                 availableProcessors: ProcessInfo.processInfo.activeProcessorCount
             ),
-            provider: "cpu"
+            provider: "cpu",
+            zipvoice: zipvoice
         )
         var config = sherpaOnnxOfflineTtsConfig(model: modelConfig, silenceScale: 0.2)
         let tts = SherpaOnnxOfflineTtsWrapper(config: &config)

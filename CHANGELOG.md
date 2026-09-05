@@ -5,6 +5,7 @@ All notable changes to LingoPlay are documented here.
 ## [Unreleased]
 
 ### Fixed
+- iOS Stage 19 Voice Cloning now passes model arguments in the order required by the pinned sherpa-onnx Swift API, fixing the Xcode compilation failure.
 - Stage 19 Android multi-speaker processing now uses bounded 6-second ASR chunks instead of the normal long-form memory chunk size, so diarization labels survive onto transcript segments and clear single-speaker cloning references remain usable on-device.
 - Android saved-video playback no longer stops its newly created VideoView during first composition. Player cleanup follows AndroidView release and media identity; device regressions cover cold entry, repeated entry, speed changes and file replacement.
 - iOS app bundles now include resolved pre-release version/build metadata, avoiding the ML Kit model-downloader fallback identified in the iOS 27 crash. Host-app tests and the built-bundle verifier reject missing or unresolved versions.
