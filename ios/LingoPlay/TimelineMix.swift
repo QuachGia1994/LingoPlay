@@ -83,6 +83,7 @@ final class TimelineMixService {
         media: LocalMediaItem,
         dub: DubSpeechDocument,
         mode: DubbingModePreset = .balanced,
+        backgroundAudioURL: URL? = nil,
         progress: @MainActor @Sendable (MixState) -> Void
     ) async throws -> LocalDubMediaResult {
         guard !dub.segments.isEmpty else { throw TimelineMixError.noSpeechClips }
@@ -110,6 +111,7 @@ final class TimelineMixService {
         )
         try await renderMixedAudio(
             sourceVideoURL: media.localURL,
+            backgroundAudioURL: backgroundAudioURL,
             dubbedAudioURL: dubbedAudioURL,
             speechSegments: dub.segments,
             mode: mode,
@@ -300,13 +302,15 @@ final class TimelineMixService {
 
     private func renderMixedAudio(
         sourceVideoURL: URL,
+        backgroundAudioURL: URL?,
         dubbedAudioURL: URL,
         speechSegments: [DubSpeechSegment],
         mode: DubbingModePreset,
         destination: URL
     ) async throws {
         let source = AVURLAsset(url: sourceVideoURL)
-        guard let sourceAudioTrack = try await source.loadTracks(withMediaType: .audio).first else {
+        let background = AVURLAsset(url: backgroundAudioURL ?? sourceVideoURL)
+        guard let sourceAudioTrack = try await background.loadTracks(withMediaType: .audio).first else {
             throw TimelineMixError.noOriginalAudioTrack
         }
         let sourceDuration = try await source.load(.duration)

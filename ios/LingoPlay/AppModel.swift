@@ -63,6 +63,9 @@ final class AppModel {
     var voiceCloningEnabled = UserDefaults.standard.bool(forKey: "lingoplay.voiceCloningEnabled") {
         didSet { UserDefaults.standard.set(voiceCloningEnabled, forKey: "lingoplay.voiceCloningEnabled") }
     }
+    var cleanBackgroundEnabled = UserDefaults.standard.bool(forKey: "lingoplay.cleanBackgroundEnabled") {
+        didSet { UserDefaults.standard.set(cleanBackgroundEnabled, forKey: "lingoplay.cleanBackgroundEnabled") }
+    }
     var dubbingMode = DubbingModePreset(rawValue: UserDefaults.standard.string(forKey: "lingoplay.dubbingMode") ?? "balanced") ?? .balanced {
         didSet { UserDefaults.standard.set(dubbingMode.rawValue, forKey: "lingoplay.dubbingMode") }
     }
@@ -89,6 +92,7 @@ final class AppModel {
     var neuralVoiceInstallState: ASRModelInstallState = .notInstalled
     var speakerModelInstallState: ASRModelInstallState = .notInstalled
     var voiceCloningModelInstallState: ASRModelInstallState = .notInstalled
+    var sourceSeparationModelInstallState: ASRModelInstallState = .notInstalled
     var downloadedTranslationModelCodes: Set<String> = []
     var translationModelBusyCode: String?
     var translationModelError: String?
@@ -115,6 +119,7 @@ final class AppModel {
     let neuralVoiceInstaller = NeuralVoicePackInstaller()
     let speakerModelInstaller = SpeakerDiarizationModelInstaller()
     let voiceCloningModelInstaller = VoiceCloningModelInstaller()
+    let sourceSeparationModelInstaller = SourceSeparationModelInstaller()
     let speakerDiarizationService = SpeakerDiarizationService()
     private let speechRecognizer: any OnDeviceSpeechRecognizer = WhisperKitSpeechRecognizer()
     let translationService = TranslationService()
@@ -131,8 +136,9 @@ final class AppModel {
     var neuralVoiceInstallTask: Task<Void, Never>?
     var speakerModelInstallTask: Task<Void, Never>?
     var voiceCloningModelInstallTask: Task<Void, Never>?
+    var sourceSeparationModelInstallTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
-    private var activeProcessingRunID: UUID?
+    var activeProcessingRunID: UUID?
     var activeProcessingConfig: ProcessingConfig?
 
     func finishSplash() {
@@ -223,16 +229,6 @@ final class AppModel {
         )
     }
 
-    struct ProcessingRun {
-        let id: UUID
-        let media: LocalMediaItem
-        let config: ProcessingConfig
-
-        func replacingConfig(_ config: ProcessingConfig) -> ProcessingRun {
-            ProcessingRun(id: id, media: media, config: config)
-        }
-    }
-
     private func launchProcessing(
         media: LocalMediaItem,
         config: ProcessingConfig,
@@ -259,7 +255,7 @@ final class AppModel {
             )
             guard isActive(run) else { return }
             if let preparedAudioURL {
-                await recognizeSpeech(from: preparedAudioURL, run: run)
+                await processPreparedAudio(preparedAudioURL, run: run)
             } else {
                 await prepareAudio(run: run)
             }
@@ -274,13 +270,6 @@ final class AppModel {
         // Keep the cancelled task owned until native work returns; replacement awaits it.
         activeProcessingRunID = nil
         return task
-    }
-
-    func isActive(_ run: ProcessingRun) -> Bool {
-        activeProcessingRunID == run.id &&
-            !Task.isCancelled &&
-            stage == .processing &&
-            selectedMedia?.id == run.media.id
     }
 
     private func prepareAudio(run: ProcessingRun) async {
@@ -299,7 +288,7 @@ final class AppModel {
             )
             guard isActive(run) else { return }
             processingProgress = 0.2
-            await recognizeSpeech(from: audioURL, run: run)
+            await processPreparedAudio(audioURL, run: run)
         } catch {
             guard isActive(run) else { return }
             await diagnostics.record("audio_preparation_failed")
@@ -307,7 +296,7 @@ final class AppModel {
         }
     }
 
-    private func recognizeSpeech(from audioURL: URL, run: ProcessingRun) async {
+    func recognizeSpeech(from sources: ProcessingAudioSources, run: ProcessingRun) async {
         guard isActive(run) else { return }
         guard let model = asrModelStore.whisperModel() else {
             asrState = .modelMissing
@@ -318,14 +307,14 @@ final class AppModel {
         do {
             asrState = .transcribing
             let transcript = try await speechRecognizer.transcribe(
-                audioURL: audioURL,
+                audioURL: sources.analysisAudioURL,
                 model: model,
                 sourceLanguageCode: run.config.sourceLanguage.code
             )
             guard isActive(run) else { return }
             asrState = .completed(transcript)
             processingProgress = 0.4
-            await resolveSpeakers(transcript, audioURL: audioURL, run: run)
+            await resolveSpeakers(transcript, sources: sources, run: run)
         } catch {
             guard isActive(run) else { return }
             await diagnostics.record("asr_failed")
@@ -336,6 +325,7 @@ final class AppModel {
     func synthesizeOfflineSpeech(
         _ document: TranslationDocument,
         cloneReferences: [String: VoiceCloneReference],
+        sources: ProcessingAudioSources,
         run: ProcessingRun
     ) async {
         guard isActive(run) else { return }
@@ -358,7 +348,7 @@ final class AppModel {
             }
             ttsState = .completed(dub)
             processingProgress = 0.8
-            await renderDubbedMedia(dub, translation: document, run: run)
+            await renderDubbedMedia(dub, translation: document, sources: sources, run: run)
         } catch TTSError.offlineVoiceMissing(_) {
             guard isActive(run) else { return }
             await diagnostics.record("tts_voice_missing")
@@ -373,6 +363,7 @@ final class AppModel {
     private func renderDubbedMedia(
         _ dub: DubSpeechDocument,
         translation: TranslationDocument,
+        sources: ProcessingAudioSources,
         run: ProcessingRun
     ) async {
         defer { TTSCachePolicy.cleanup(document: dub) }
@@ -381,7 +372,8 @@ final class AppModel {
             let result = try await timelineMixService.render(
                 media: run.media,
                 dub: dub,
-                mode: run.config.dubbingMode
+                mode: run.config.dubbingMode,
+                backgroundAudioURL: sources.backgroundAudioURL
             ) { [weak self] state in
                 guard let self, self.isActive(run) else { return }
                 mixState = state
@@ -417,12 +409,16 @@ final class AppModel {
             processedMedia = result
             mixState = .completed(result)
             processingProgress = 1.0
-            try await configurePlayback(
-                with: result,
-                dub: dub,
-                media: run.media,
-                mode: run.config.dubbingMode
-            )
+            if run.config.cleanBackgroundEnabled, let libraryURL = activeLibraryURL {
+                configureSavedPlayback(url: libraryURL, duration: result.duration)
+            } else {
+                try await configurePlayback(
+                    with: result,
+                    dub: dub,
+                    media: run.media,
+                    mode: run.config.dubbingMode
+                )
+            }
             guard isActive(run) else { return }
             activeProcessingConfig = nil
             stage = .player
@@ -456,6 +452,7 @@ final class AppModel {
         neuralVoiceInstallState = await neuralVoiceInstaller.state()
         speakerModelInstallState = await speakerModelInstaller.state()
         voiceCloningModelInstallState = await voiceCloningModelInstaller.state()
+        sourceSeparationModelInstallState = await sourceSeparationModelInstaller.state()
     }
 
     func installSpeechModel() {
@@ -741,7 +738,8 @@ final class AppModel {
             translationMode: translationMode,
             speakerMode: speakerMode,
             speakerVoiceMap: [:],
-            voiceCloningEnabled: voiceCloningEnabled
+            voiceCloningEnabled: voiceCloningEnabled,
+            cleanBackgroundEnabled: cleanBackgroundEnabled
         )
     }
 

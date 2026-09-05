@@ -5,104 +5,31 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.util.Rational
-import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ClosedCaption
-import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Forward10
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.PictureInPictureAlt
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.RadioButtonUnchecked
-import androidx.compose.material.icons.rounded.Replay10
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Storage
-import androidx.compose.material.icons.rounded.Subtitles
-import androidx.compose.material.icons.rounded.Translate
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.VideoLibrary
-import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material.icons.rounded.WifiOff
-import androidx.compose.material.icons.rounded.WorkspacePremium
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -163,6 +90,7 @@ fun LingoPlayApp() {
     val translationMode = dubbingState.translationMode
     val speakerMode = dubbingState.speakerMode
     val voiceCloningEnabled = dubbingState.voiceCloningEnabled
+    val cleanBackgroundEnabled = dubbingState.cleanBackgroundEnabled
     val dubbingMode = dubbingState.dubbingMode
     val subtitleMode = dubbingState.subtitleMode
     val playbackSpeed = dubbingState.playbackSpeed
@@ -173,6 +101,7 @@ fun LingoPlayApp() {
     val cycleTranslationMode: () -> Unit = dubbingState::cycleTranslationMode
     val cycleSpeakerMode: () -> Unit = dubbingState::cycleSpeakerMode
     val setVoiceCloningEnabled: (Boolean) -> Unit = dubbingState::updateVoiceCloningConsent
+    val setCleanBackgroundEnabled: (Boolean) -> Unit = dubbingState::updateCleanBackground
     val cycleDubbingMode: () -> Unit = dubbingState::cycleDubbingMode
     val cycleSubtitleMode: () -> Unit = dubbingState::cycleSubtitleMode
     val cycleVoice: () -> Unit = dubbingState::cycleVoice
@@ -185,6 +114,7 @@ fun LingoPlayApp() {
     val neuralVoiceInstallState = stage19Models.neuralState
     val speakerModelInstallState = stage19Models.speakerState
     val cloningModelInstallState = stage19Models.cloningState
+    val sourceSeparationModelInstallState = stage19Models.sourceSeparationState
     val downloadedTranslationModelCodes = stage19Models.downloadedTranslationModelCodes
     val translationModelBusyCode = stage19Models.translationModelBusyCode
     val translationModelError = stage19Models.translationModelError
@@ -245,6 +175,12 @@ fun LingoPlayApp() {
     val cancelCloningModelInstall: () -> Unit = stage19Models::cancelCloning
     val deleteCloningModel: () -> Unit = {
         stage19Models.deleteCloning(canDelete = ttsPhase != TTSPhase.SYNTHESIZING)
+    }
+
+    val startSourceSeparationModelInstall: () -> Unit = { stage19Models.installSourceSeparation(wifiOnly) }
+    val cancelSourceSeparationModelInstall: () -> Unit = stage19Models::cancelSourceSeparation
+    val deleteSourceSeparationModel: () -> Unit = {
+        stage19Models.deleteSourceSeparation(canDelete = stageName != Stage.PROCESSING.name)
     }
 
     val toggleTranslationModel: (String) -> Unit = { code ->
@@ -412,10 +348,14 @@ fun LingoPlayApp() {
                     ttsPhaseName = TTSPhase.FAILED.name
                     ttsError = "Voice Cloning model required. Install the optional local model in Settings; cloning never falls back to cloud."
                 }
+                ProcessingOutcome.SourceSeparationModelMissing -> {
+                    mediaState = MediaPreparationState.FAILED.name
+                    mediaError = "Clean Background model required. Install the verified local model in Settings, then retry."
+                }
                 ProcessingOutcome.TranslationEndpointMissing -> translationPhaseName = TranslationPhase.ENDPOINT_MISSING.name
                 ProcessingOutcome.VoiceMissing -> ttsPhaseName = TTSPhase.VOICE_MISSING.name
                 is ProcessingOutcome.Failed -> when (outcome.step) {
-                    ProcessingFailureStep.AUDIO -> {
+                    ProcessingFailureStep.AUDIO, ProcessingFailureStep.SEPARATION -> {
                         mediaState = MediaPreparationState.FAILED.name
                         mediaError = outcome.message
                     }
@@ -521,12 +461,14 @@ fun LingoPlayApp() {
                         voiceLabel = preferredVoiceLabel,
                         dubbingMode = dubbingMode,
                         subtitleMode = subtitleMode,
-                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
+                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable(context),
+                        cleanBackgroundEnabled = cleanBackgroundEnabled,
                         onSourceLanguage = cycleSourceLanguage,
                         onTargetLanguage = cycleTargetLanguage,
                         onTranslationMode = cycleTranslationMode,
                         onVoice = cycleVoice,
                         onDubbingMode = cycleDubbingMode,
+                        onCleanBackgroundEnabled = setCleanBackgroundEnabled,
                         onSubtitleMode = cycleSubtitleMode,
                         onBack = backFromPrepare,
                         onEdit = { mediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
@@ -689,6 +631,7 @@ fun LingoPlayApp() {
                             translationMode = translationMode,
                             speakerMode = speakerMode,
                             voiceCloningEnabled = voiceCloningEnabled,
+                            cleanBackgroundEnabled = cleanBackgroundEnabled,
                             voiceLabel = preferredVoiceLabel,
                             isPlus = plusStore.isPlus,
                             modelInstallState = modelInstallState,
@@ -699,6 +642,8 @@ fun LingoPlayApp() {
                             canDeleteSpeakerModel = speakerPhase != SpeakerPhase.ANALYZING,
                             cloningModelInstallState = cloningModelInstallState,
                             canDeleteCloningModel = ttsPhase != TTSPhase.SYNTHESIZING,
+                            sourceSeparationModelInstallState = sourceSeparationModelInstallState,
+                            canDeleteSourceSeparationModel = stageName != Stage.PROCESSING.name,
                             downloadedTranslationModelCodes = downloadedTranslationModelCodes,
                             translationModelBusyCode = translationModelBusyCode,
                             translationModelError = translationModelError,
@@ -715,6 +660,9 @@ fun LingoPlayApp() {
                             onInstallCloningModel = startCloningModelInstall,
                             onCancelCloningModel = cancelCloningModelInstall,
                             onDeleteCloningModel = deleteCloningModel,
+                            onInstallSourceSeparationModel = startSourceSeparationModelInstall,
+                            onCancelSourceSeparationModel = cancelSourceSeparationModelInstall,
+                            onDeleteSourceSeparationModel = deleteSourceSeparationModel,
                             onToggleTranslationModel = toggleTranslationModel,
                             onToggleAppearance = {
                                 highContrast = !highContrast
@@ -734,6 +682,7 @@ fun LingoPlayApp() {
                             onTranslationMode = cycleTranslationMode,
                             onSpeakerMode = cycleSpeakerMode,
                             onVoiceCloningEnabled = setVoiceCloningEnabled,
+                            onCleanBackgroundEnabled = setCleanBackgroundEnabled,
                             onVoice = cycleVoice,
                             onPlus = { stageName = Stage.PLUS.name },
                             onAbout = { stageName = Stage.ABOUT.name },
@@ -749,7 +698,7 @@ fun LingoPlayApp() {
                     Stage.ABOUT -> AboutScreen(
                         language = uiLanguage,
                         diagnosticsCount = LocalDiagnostics.recent(context).size,
-                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable,
+                        cleanBackgroundAvailable = CleanBackgroundCapability.isAvailable(context),
                         onBack = backToHome,
                     )
                 }

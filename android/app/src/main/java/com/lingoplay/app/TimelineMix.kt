@@ -143,6 +143,7 @@ object TimelineMixService {
         media: LocalMediaItem,
         dub: DubSpeechDocument,
         mode: DubbingModePreset = DubbingModePreset.BALANCED,
+        backgroundAudioFile: File? = null,
         onPhase: suspend (MixPhase) -> Unit = {},
     ): LocalDubMediaResult = withContext(Dispatchers.IO) {
         require(dub.segments.isNotEmpty()) { "No Vietnamese speech clips are available to mix." }
@@ -157,7 +158,7 @@ object TimelineMixService {
 
         try {
             onPhase(MixPhase.RENDERING_AUDIO)
-            renderMixedAudio(context, media, dub, mode, mixedAudio)
+            renderMixedAudio(context, media, dub, mode, backgroundAudioFile, mixedAudio)
 
             onPhase(MixPhase.REMUXING)
             remuxVideoWithMixedAudio(context, media.uri, mixedAudio, remuxedVideo)
@@ -178,9 +179,14 @@ object TimelineMixService {
         media: LocalMediaItem,
         dub: DubSpeechDocument,
         mode: DubbingModePreset,
+        backgroundAudioFile: File?,
         destination: File,
     ) {
-        val extractor = openExtractor(context, media.uri)
+        val extractor = if (backgroundAudioFile != null) {
+            MediaExtractor().apply { setDataSource(backgroundAudioFile.absolutePath) }
+        } else {
+            openExtractor(context, media.uri)
+        }
         val audioTrack = (0 until extractor.trackCount).firstOrNull { index ->
             extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
         } ?: error("The source video has no readable audio track.")

@@ -76,6 +76,7 @@ data class ProcessingConfig(
     val speakerMode: SpeakerMode = SpeakerMode.SINGLE,
     val speakerVoiceMap: Map<String, String> = emptyMap(),
     val voiceCloningEnabled: Boolean = false,
+    val cleanBackgroundEnabled: Boolean = false,
 )
 
 fun ProcessingConfig.resuming(currentCloningConsent: Boolean): ProcessingConfig =
@@ -91,6 +92,7 @@ data class ProcessingConfigRecord(
     val speakerMode: String = SpeakerMode.SINGLE.name,
     val speakerVoiceMap: Map<String, String> = emptyMap(),
     val voiceCloningEnabled: Boolean = false,
+    val cleanBackgroundEnabled: Boolean = false,
 )
 
 fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord(
@@ -103,6 +105,7 @@ fun ProcessingConfig.toRecord(): ProcessingConfigRecord = ProcessingConfigRecord
     speakerMode = speakerMode.name,
     speakerVoiceMap = speakerVoiceMap,
     voiceCloningEnabled = voiceCloningEnabled,
+    cleanBackgroundEnabled = cleanBackgroundEnabled,
 )
 
 fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
@@ -116,6 +119,7 @@ fun ProcessingConfigRecord.toConfig(): ProcessingConfig? = runCatching {
         speakerMode = SpeakerMode.valueOf(speakerMode),
         speakerVoiceMap = speakerVoiceMap.filterKeys { it.matches(Regex("speaker_[1-9][0-9]*")) },
         voiceCloningEnabled = voiceCloningEnabled,
+        cleanBackgroundEnabled = cleanBackgroundEnabled,
     )
 }.getOrNull()
 
@@ -138,6 +142,7 @@ interface DubbingPreferencePersistence {
     var preferredVoiceId: String?
     var speakerMode: SpeakerMode
     var voiceCloningEnabled: Boolean
+    var cleanBackgroundEnabled: Boolean
 }
 
 class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
@@ -178,6 +183,10 @@ class DubbingPreferencesStore(context: Context) : DubbingPreferencePersistence {
     override var voiceCloningEnabled: Boolean
         get() = prefs.getBoolean("voice_cloning_enabled", false)
         set(value) = prefs.edit().putBoolean("voice_cloning_enabled", value).apply()
+
+    override var cleanBackgroundEnabled: Boolean
+        get() = prefs.getBoolean("clean_background_enabled", false)
+        set(value) = prefs.edit().putBoolean("clean_background_enabled", value).apply()
 
     private inline fun <reified T : Enum<T>> enumValue(key: String, fallback: T): T =
         runCatching { enumValueOf<T>(prefs.getString(key, fallback.name) ?: fallback.name) }.getOrDefault(fallback)

@@ -1,6 +1,6 @@
 # System architecture
 
-> updated 2026-09-05 · 463175d
+> updated 2026-09-05 · Stage 20 engineering closure
 
 ## Goal
 Keep the heavy media path local while exposing a small server boundary for translation/provider access and entitlement state.
@@ -66,7 +66,7 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 ## Stage 10 quality boundary
 - Android skips near-silent decoded chunks before Whisper, still uses bounded memory, and chooses low-energy chunk boundaries where available. Synthesized speech clips are RMS-normalized with a peak ceiling before mix; summed PCM uses a soft limiter rather than hard clipping.
 - iOS keeps the original soundtrack and uses a gentler 120 ms duck envelope / higher background floor for less pumping around Vietnamese speech.
-- `Clean Background` is deliberately reported as unavailable. The current artifact does not bundle a verified cross-platform source-separation engine, so the product does not pretend adaptive ducking is stem separation.
+- The normal Stage 10 path remains adaptive soundtrack ducking and does not claim stem separation. Stage 20 adds a separate opt-in Clean Background path that is enabled only when the native runtime and checksum-verified Spleeter model are both present.
 
 ## Stage 11 lifecycle boundary
 - Both clients copy selected video into app-owned local storage before processing and persist a small local recovery checkpoint. The checkpoint also carries the immutable processing configuration (source/target language, preferred voice, dubbing mode, subtitle mode), so Resume cannot silently adopt Settings changed after the original run began. If the process is interrupted, Home offers Resume/Discard; resume uses prepared audio when it still exists and otherwise restarts from the owned source video.
@@ -87,13 +87,13 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 
 ## Stage 14 advanced-capability boundary
 - Android Plus parity uses Google Play Billing 9.1.0 as described above; iOS remains StoreKit 2. Neither client treats a persisted local flag as billing authority. Android Billing connection startup is serialized and service disconnects schedule a single reconnect; subscription offer selection prefers the base-plan offer instead of arbitrary list ordering.
-- Both clients define an explicit source-separation engine protocol/capability seam. `Clean Background` remains unavailable because this artifact still has no verified cross-platform native separator engine/model; adaptive ducking is not presented as stem separation.
-- Stage 14 shipped only installed system voices. Stage 17.1 later adds one explicitly installed Vietnamese neural preset for validation; multi-speaker, emotion, cloning, and source-separation features remain unavailable and are not advertised as active.
+- Both clients retain the Stage 14 source-separation seam. Stage 20 now supplies a real local Spleeter implementation behind it; capability is runtime + verified-model gated, off by default, and independent from the normal adaptive-ducking path.
+- Stage 14 shipped only installed system voices. Later stages add the explicit Vietnamese neural preset, opt-in multi-speaker/EN-ZH cloning, and Stage 20 source separation; emotion synthesis remains unavailable.
 
 ## Stage 15 architecture/testability boundary
 - Android Compose root owns app-level orchestration/navigation/state wiring only. Rendering is split by domain, dubbing preferences live in a plain state holder backed by a persistence interface, and the processing chain is delegated to `AndroidProcessingCoordinator` through a typed runtime boundary. Root code is structurally forbidden from directly invoking Whisper transcription, translation, TTS, or timeline mix services.
 - iOS keeps `@Observable AppModel` as the app-facing state source, while view rendering is split by screen domain and pure preference/playback presentation logic lives in focused extensions/policy types. No ObservableObject/KMP rewrite is introduced.
-- `contracts/product-contract.json` is the machine-readable product-policy contract. `verify_product_contract.py` checks native parity for language ordering, playback rates, dubbing-mode duck/gain/fade values, Plus product IDs, and the fact that Clean Background remains unverified/unavailable.
+- `contracts/product-contract.json` is the machine-readable product-policy contract. `verify_product_contract.py` checks native parity for language ordering, playback rates, dubbing-mode duck/gain/fade values, Plus product IDs, Clean Background model/runtime pins, opt-in defaults, transient-stem behavior, and the separate cross-device certification flag.
 - `verify_architecture.py` enforces god-file removal, size/responsibility budgets, processing delegation, policy/test seams, iOS unit-test target wiring, and platform CI guardrails.
 - Android JVM tests cover player-interaction policy and preference state with fake persistence. Coordinator instrumentation tests compile in CI and require a real Android runtime to execute. iOS XcodeGen now declares `LingoPlayTests`; macOS CI runs policy unit tests before the unsigned release build.
 
@@ -165,5 +165,13 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Mix/remux retains the complete dubbed audio track after the source video ends. iOS extends original-audio/video composition tracks with empty timeline ranges to the dubbed duration, so output and Library duration reflect the extended media without synthesizing extra video frames. Linh's Vietnamese system rate remains 0.82 baseline and 1.18 maximum fit multiplier; existing overlap placement remains unchanged.
 - Swift recovery writes check cancellation at the actor storage boundary. A cancelled processing task remains owned until native return; replacement runs await it and generation-scoped recovery refresh rejects stale UI writes. Native synchronous inference has cooperative checks before/after calls; Task cancellation is not a native hard-abort watchdog.
 
+## Stage 20 Clean Background boundary
+- Clean Background is explicit and defaults off in both native preference stores. The immutable processing config and recovery checkpoint preserve that choice; Resume recomputes separation from durable prepared audio rather than persisting a reusable stem library.
+- Both clients pin `sherpa-onnx-spleeter-2stems-fp16.tar.bz2` at 35,271,738 bytes with SHA-256 `c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6`. Install/delete is explicit, outside the base app, storage-gated, traversal/link/expansion constrained, and activation is versioned only after validation.
+- iOS uses the pinned sherpa-onnx 1.13.7 Swift/C surface. Android keeps the same 1.13.7 AAR and adds a minimal app-owned JNI/CMake bridge to its exported source-separation C API rather than adding a second inference runtime.
+- Separation consumes prepared audio in bounded chunks and writes temporary `vocals.wav` plus `accompaniment.wav`. Vocals feed ASR, diarization and cloning-reference extraction; accompaniment replaces the original soundtrack input for final mix. When Clean Background is off, the existing audio path is unchanged.
+- Temporary stems stay owned by the active processing run and are deleted on success, failure, cancellation or stale-result rejection. Missing executable runtime or verified model fails closed and never silently falls back after the user explicitly enabled Clean Background.
+- Capability UI reports executable readiness only when runtime + verified installed model are present. `cleanBackgroundVerified=false` remains a separate cross-device quality/performance certification flag until physical Android and iPhone output evidence exists.
+
 ## Current stage
-Stage 18 is functionally closed. Stage 19.2 repairs the confirmed Gemini/Grok audit findings on the Stage 19 implementation; its final source, device and CI evidence is maintained in the LingoPlay Foundation plan. Meizu regressions exercise actual diarization, ASR/reference/ZipVoice, hybrid-failure cleanup and audible audio past the source-video end. macOS CI remains authoritative for Swift tests and IPA packaging. Physical iPhone Stage 19 inference and subjective Linh quality are not inferred from earlier Stage 18 feedback. Stage 20 source separation and Stage 21 production distribution remain separate unfinished stages.
+Stage 18 is functionally closed. Stage 19.2 engineering/CI closure is complete on `871c853`: Android run `33949966315` and iOS run `33949966327` both succeeded, including the focused iOS Stage 19 runtime regressions. Stage 20 source-separation engineering is being closed with source/unit/build/CI evidence; physical Meizu/iPhone output and performance certification are intentionally excluded from the current closure request. Stage 21 production distribution remains separate.

@@ -357,4 +357,37 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(revoked.speakerVoiceMap, config.speakerVoiceMap)
         XCTAssertFalse(revoked.resuming(currentCloningConsent: true).voiceCloningEnabled)
     }
+
+    func testStage20ProcessingConfigPreservesCleanBackgroundAcrossResume() {
+        let config = ProcessingConfig(
+            sourceLanguage: .en,
+            targetLanguage: .vi,
+            preferredVoiceIdentifier: nil,
+            dubbingMode: .speechFocus,
+            subtitleMode: .translated,
+            translationMode: .offline,
+            cleanBackgroundEnabled: true
+        )
+        XCTAssertTrue(config.cleanBackgroundEnabled)
+        XCTAssertTrue(config.resuming(currentCloningConsent: false).cleanBackgroundEnabled)
+    }
+
+    func testSourceSeparationManifestAndArchivePolicyArePinned() {
+        XCTAssertEqual(SourceSeparationManifest.archiveBytes, 35_271_738)
+        XCTAssertEqual(
+            SourceSeparationManifest.archiveSHA256,
+            "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6"
+        )
+        let root = SourceSeparationManifest.archiveRoot
+        XCTAssertEqual(
+            SourceSeparationArchivePolicy.relativePath(for: "\(root)/\(SourceSeparationManifest.vocalsName)"),
+            SourceSeparationManifest.vocalsName
+        )
+        XCTAssertEqual(
+            SourceSeparationArchivePolicy.relativePath(for: "\(root)/\(SourceSeparationManifest.accompanimentName)"),
+            SourceSeparationManifest.accompanimentName
+        )
+        XCTAssertNil(SourceSeparationArchivePolicy.relativePath(for: "\(root)/../escape.onnx"))
+        XCTAssertNil(SourceSeparationArchivePolicy.relativePath(for: "\(root)/subdir/model.onnx"))
+    }
 }

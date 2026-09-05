@@ -5,6 +5,7 @@ extension AppModel {
     func translateTranscript(
         _ transcript: ASRTranscript,
         cloneReferences: [String: VoiceCloneReference],
+        sources: ProcessingAudioSources,
         run: ProcessingRun
     ) async {
         let updateProgress: @MainActor @Sendable (Int, Int) -> Void = { [weak self] item, total in
@@ -49,6 +50,7 @@ extension AppModel {
             await synthesizeOfflineSpeech(
                 resolvedDocument,
                 cloneReferences: cloneReferences,
+                sources: sources,
                 run: run
             )
         } catch {

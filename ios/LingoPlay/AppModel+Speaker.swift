@@ -4,13 +4,13 @@ import Foundation
 extension AppModel {
     func resolveSpeakers(
         _ transcript: ASRTranscript,
-        audioURL: URL,
+        sources: ProcessingAudioSources,
         run: ProcessingRun
     ) async {
         guard isActive(run) else { return }
         guard run.config.speakerMode == .multi else {
             speakerState = .idle
-            await translateTranscript(transcript, cloneReferences: [:], run: run)
+            await translateTranscript(transcript, cloneReferences: [:], sources: sources, run: run)
             return
         }
         guard let model = SpeakerDiarizationModelStore().model() else {
@@ -24,7 +24,7 @@ extension AppModel {
         let diarization: SpeakerDiarizationDocument
         do {
             diarization = try await speakerDiarizationService.diarize(
-                audioURL: audioURL,
+                audioURL: sources.analysisAudioURL,
                 model: model
             )
         } catch {
@@ -55,13 +55,14 @@ extension AppModel {
             translationMode: run.config.translationMode,
             speakerMode: run.config.speakerMode,
             speakerVoiceMap: mapping,
-            voiceCloningEnabled: run.config.voiceCloningEnabled
+            voiceCloningEnabled: run.config.voiceCloningEnabled,
+            cleanBackgroundEnabled: run.config.cleanBackgroundEnabled
         )
         let resolvedRun = run.replacingConfig(resolvedConfig)
         activeProcessingConfig = resolvedConfig
         try? await processingRecoveryStore.save(
             media: run.media,
-            preparedAudioURL: audioURL,
+            preparedAudioURL: sources.preparedAudioURL,
             config: resolvedConfig,
             processingRunID: run.id
         )
@@ -80,7 +81,7 @@ extension AppModel {
             }
             do {
                 cloneReferences = try await VoiceCloneReferenceBuilder.build(
-                    audioURL: audioURL,
+                    audioURL: sources.analysisAudioURL,
                     transcript: annotated
                 )
             } catch {
@@ -91,7 +92,7 @@ extension AppModel {
             }
             // Unknown/mixed speech uses the selected offline voices when no safe reference exists.
         }
-        await translateTranscript(annotated, cloneReferences: cloneReferences, run: resolvedRun)
+        await translateTranscript(annotated, cloneReferences: cloneReferences, sources: sources, run: resolvedRun)
     }
 
     func cycleSpeakerMode() {

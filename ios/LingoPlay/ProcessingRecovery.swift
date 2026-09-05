@@ -30,6 +30,7 @@ actor ProcessingRecoveryStore {
         let speakerMode: String?
         let speakerVoiceMap: [String: String]?
         let voiceCloningEnabled: Bool?
+        let cleanBackgroundEnabled: Bool?
         let processingRunID: UUID?
         let updatedAtEpochMs: Int64
     }
@@ -90,6 +91,7 @@ actor ProcessingRecoveryStore {
             speakerMode: config?.speakerMode.rawValue,
             speakerVoiceMap: config?.speakerVoiceMap,
             voiceCloningEnabled: config?.voiceCloningEnabled,
+            cleanBackgroundEnabled: config?.cleanBackgroundEnabled,
             processingRunID: processingRunID,
             updatedAtEpochMs: Int64(Date().timeIntervalSince1970 * 1_000)
         )
@@ -132,7 +134,8 @@ actor ProcessingRecoveryStore {
             translationMode: record.translationMode.flatMap(TranslationMode.init(rawValue:)) ?? .cloud,
             speakerMode: record.speakerMode.flatMap(SpeakerMode.init(rawValue:)) ?? .single,
             speakerVoiceMap: record.speakerVoiceMap ?? [:],
-            voiceCloningEnabled: record.voiceCloningEnabled ?? false
+            voiceCloningEnabled: record.voiceCloningEnabled ?? false,
+            cleanBackgroundEnabled: record.cleanBackgroundEnabled ?? false
         )
     }
 

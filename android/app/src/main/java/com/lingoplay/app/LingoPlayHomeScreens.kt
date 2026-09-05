@@ -217,11 +217,13 @@ internal fun PrepareScreen(
     dubbingMode: DubbingModePreset,
     subtitleMode: SubtitleMode,
     cleanBackgroundAvailable: Boolean,
+    cleanBackgroundEnabled: Boolean,
     onSourceLanguage: () -> Unit,
     onTargetLanguage: () -> Unit,
     onTranslationMode: () -> Unit,
     onVoice: () -> Unit,
     onDubbingMode: () -> Unit,
+    onCleanBackgroundEnabled: (Boolean) -> Unit,
     onSubtitleMode: () -> Unit,
     onBack: () -> Unit,
     onEdit: () -> Unit,
@@ -257,8 +259,9 @@ internal fun PrepareScreen(
             PrepareRow(
                 Icons.Rounded.AutoAwesome,
                 "Clean Background",
-                if (cleanBackgroundAvailable) "Ready" else "Unavailable",
-                if (cleanBackgroundAvailable) "Verified source-separation engine installed" else "No verified source-separation engine is bundled yet",
+                if (cleanBackgroundEnabled) "On" else "Off",
+                if (cleanBackgroundAvailable) "Uses local vocals/accompaniment separation" else "Install the verified local model in Settings before processing",
+                { onCleanBackgroundEnabled(!cleanBackgroundEnabled) },
             )
             CardDivider()
             PrepareRow(Icons.Rounded.Subtitles, "Subtitles", subtitleMode.label, "Player subtitle display mode", onSubtitleMode)

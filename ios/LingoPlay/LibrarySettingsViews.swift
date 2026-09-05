@@ -133,6 +133,18 @@ struct SettingsView: View {
                         .foregroundStyle(LPTheme.secondaryText)
                         .padding(.bottom, 10)
                     Divider().overlay(LPTheme.border)
+                    Toggle(isOn: $model.cleanBackgroundEnabled) {
+                        Label(model.uiText("Clean Background", "Tách nền sạch"), systemImage: "waveform.path.ecg")
+                    }
+                    .padding(.vertical, 14)
+                    Text(model.uiText(
+                        "When enabled, local source separation removes dialogue from the background stem before translated speech is mixed. A verified model must be installed.",
+                        "Khi bật, tách nguồn cục bộ loại lời thoại khỏi stem nền trước khi trộn giọng dịch. Cần cài model đã xác minh."
+                    ))
+                        .font(.caption2)
+                        .foregroundStyle(LPTheme.secondaryText)
+                        .padding(.bottom, 10)
+                    Divider().overlay(LPTheme.border)
                     Toggle(isOn: $model.wifiOnly) {
                         Label(model.uiText("Download models on Wi-Fi only", "Chỉ tải model bằng Wi-Fi"), systemImage: "wifi")
                     }
@@ -158,6 +170,8 @@ struct SettingsView: View {
                 OfflineTranslationModelManagementCard(model: model)
 
                 SpeechModelManagementCard(model: model)
+
+                SourceSeparationModelManagementCard(model: model)
 
                 SpeakerModelManagementCard(model: model)
 
@@ -229,7 +243,7 @@ struct PlusView: View {
                         Label(model.uiText("Planned Plus capabilities", "Tính năng Plus dự kiến"), systemImage: "sparkles")
                             .font(.headline)
                             .foregroundStyle(LPTheme.accent)
-                        Text(model.uiText("Installed offline-voice selection and PiP are live. Clean Background/source separation remains disabled until a verified native engine is integrated.", "Chọn giọng offline đã cài và PiP đã hoạt động. Clean Background/tách nguồn vẫn tắt cho đến khi có engine native được xác minh."))
+                        Text(model.uiText("Clean Background requires an explicit verified-model install; cross-device quality certification remains pending.", "Tách nền sạch cần chủ động cài model đã xác minh; kiểm định chất lượng đa thiết bị vẫn đang chờ."))
                             .font(.subheadline)
                             .foregroundStyle(LPTheme.secondaryText)
                     }

@@ -86,13 +86,31 @@ for relative in (
 ):
     size_under(relative, 32_000)
 
+for relative in (
+    "android/app/src/main/java/com/lingoplay/app/SourceSeparation.kt",
+    "android/app/src/main/java/com/lingoplay/app/SourceSeparationModel.kt",
+    "android/app/src/main/java/com/lingoplay/app/LingoPlayStage20Settings.kt",
+    "ios/LingoPlay/SourceSeparation.swift",
+    "ios/LingoPlay/SourceSeparationModel.swift",
+    "ios/LingoPlay/AppModel+SourceSeparation.swift",
+    "ios/LingoPlay/Stage20SettingsView.swift",
+):
+    size_under(relative, 32_000)
+require((ROOT / "android/app/src/main/cpp/CMakeLists.txt").is_file(), "Android Stage 20 CMake bridge exists")
+require((ROOT / "android/app/src/main/cpp/source_separation_jni.cpp").is_file(), "Android Stage 20 JNI bridge exists")
+require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/SourceSeparationDeviceTest.kt").is_file(), "Android Stage 20 physical separation regression exists")
+
 ios_model = (ROOT / "ios/LingoPlay/AppModel.swift").read_text(encoding="utf-8")
+ios_processing_run_path = ROOT / "ios/LingoPlay/ProcessingRun.swift"
+require(ios_processing_run_path.is_file(), "iOS processing run helper exists")
+size_under("ios/LingoPlay/ProcessingRun.swift", 8_000)
+ios_processing_run = ios_processing_run_path.read_text(encoding="utf-8")
 ios_translation_pipeline = (ROOT / "ios/LingoPlay/AppModel+TranslationPipeline.swift").read_text(encoding="utf-8")
 require(re.search(r"\bstruct\s+\w+View\b", ios_model) is None, "iOS AppModel contains no SwiftUI view structs")
 require("DubbingPreferencePolicy.availableOfflineVoices()" not in ios_model, "iOS preference presentation extracted from AppModel core")
 require("private var processingTask: Task<Void, Never>?" in ios_model, "iOS processing task is explicitly tracked")
-require("private var activeProcessingRunID: UUID?" in ios_model, "iOS processing run identity is tracked")
-require("selectedMedia?.id == run.media.id" in ios_model, "iOS stale processing runs cannot mutate a replacement media item")
+require("var activeProcessingRunID: UUID?" in ios_model and "let id: UUID" in ios_processing_run, "iOS processing run identity is tracked")
+require("selectedMedia?.id == run.media.id" in ios_processing_run, "iOS stale processing runs cannot mutate a replacement media item")
 require("await cancelledProcessingTask?.value" in ios_model, "iOS Back waits for cancelled processing before loading recovery")
 require("expectedRunID: run.id" in ios_model, "iOS completion clears only its own recovery checkpoint")
 

@@ -57,6 +57,7 @@ class DubbingPreferenceStateTest {
         override var translationMode = TranslationMode.CLOUD
         override var speakerMode = SpeakerMode.SINGLE
         override var voiceCloningEnabled = false
+        override var cleanBackgroundEnabled = false
         override var dubbingMode = DubbingModePreset.BALANCED
         override var subtitleMode = SubtitleMode.BILINGUAL
         override var playbackSpeed = 1.0f

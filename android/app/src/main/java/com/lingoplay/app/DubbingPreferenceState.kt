@@ -30,6 +30,8 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
         private set
     var voiceCloningEnabled by mutableStateOf(store.voiceCloningEnabled)
         private set
+    var cleanBackgroundEnabled by mutableStateOf(store.cleanBackgroundEnabled)
+        private set
     var offlineVoices by mutableStateOf<List<OfflineVoiceOption>>(emptyList())
         private set
 
@@ -51,6 +53,7 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
             translationMode = translationMode,
             speakerMode = speakerMode,
             voiceCloningEnabled = voiceCloningEnabled,
+            cleanBackgroundEnabled = cleanBackgroundEnabled,
         )
 
     fun updateOfflineVoices(voices: List<OfflineVoiceOption>) {
@@ -87,6 +90,11 @@ class DubbingPreferenceState(private val store: DubbingPreferencePersistence) {
     fun updateVoiceCloningConsent(enabled: Boolean) {
         voiceCloningEnabled = enabled
         store.voiceCloningEnabled = enabled
+    }
+
+    fun updateCleanBackground(enabled: Boolean) {
+        cleanBackgroundEnabled = enabled
+        store.cleanBackgroundEnabled = enabled
     }
 
     fun cycleSubtitleMode() {

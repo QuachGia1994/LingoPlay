@@ -121,6 +121,7 @@ internal fun SettingsScreen(
     translationMode: TranslationMode,
     speakerMode: SpeakerMode,
     voiceCloningEnabled: Boolean,
+    cleanBackgroundEnabled: Boolean,
     voiceLabel: String,
     isPlus: Boolean,
     modelInstallState: ModelInstallState,
@@ -131,6 +132,8 @@ internal fun SettingsScreen(
     canDeleteSpeakerModel: Boolean,
     cloningModelInstallState: ModelInstallState,
     canDeleteCloningModel: Boolean,
+    sourceSeparationModelInstallState: ModelInstallState,
+    canDeleteSourceSeparationModel: Boolean,
     downloadedTranslationModelCodes: Set<String>,
     translationModelBusyCode: String?,
     translationModelError: String?,
@@ -147,6 +150,9 @@ internal fun SettingsScreen(
     onInstallCloningModel: () -> Unit,
     onCancelCloningModel: () -> Unit,
     onDeleteCloningModel: () -> Unit,
+    onInstallSourceSeparationModel: () -> Unit,
+    onCancelSourceSeparationModel: () -> Unit,
+    onDeleteSourceSeparationModel: () -> Unit,
     onToggleTranslationModel: (String) -> Unit,
     onToggleAppearance: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -156,6 +162,7 @@ internal fun SettingsScreen(
     onTranslationMode: () -> Unit,
     onSpeakerMode: () -> Unit,
     onVoiceCloningEnabled: (Boolean) -> Unit,
+    onCleanBackgroundEnabled: (Boolean) -> Unit,
     onVoice: () -> Unit,
     onPlus: () -> Unit,
     onAbout: () -> Unit,
@@ -202,6 +209,21 @@ internal fun SettingsScreen(
                 language.text(
                     "Consent gate only. Cloning is local, requires a verified model and matching reference speech; never use it to impersonate someone without permission.",
                     "Chỉ là cổng đồng ý. Clone chạy cục bộ, cần model đã xác minh và mẫu giọng khớp; không dùng để giả mạo người khác khi chưa được phép.",
+                ),
+                color = LpSecondaryText,
+                fontSize = 10.sp,
+            )
+            CardDivider()
+            ToggleRow(
+                Icons.Rounded.AutoAwesome,
+                language.text("Clean Background", "Tách nền sạch"),
+                cleanBackgroundEnabled,
+                onCleanBackgroundEnabled,
+            )
+            Text(
+                language.text(
+                    "When enabled, local source separation removes dialogue from the background stem before mixing the translated voice. A verified model must be installed.",
+                    "Khi bật, tách nguồn cục bộ loại lời thoại khỏi stem nền trước khi trộn giọng dịch. Cần cài model đã xác minh.",
                 ),
                 color = LpSecondaryText,
                 fontSize = 10.sp,
@@ -310,6 +332,15 @@ internal fun SettingsScreen(
                 ModelInstallState.NotInstalled -> PrimaryAction(language.text("Install Speech AI · ~104 MB", "Cài Speech AI · ~104 MB"), Icons.Rounded.Download, onInstallModel)
             }
         }
+
+        SourceSeparationModelManagementCard(
+            language = language,
+            state = sourceSeparationModelInstallState,
+            canDelete = canDeleteSourceSeparationModel,
+            onInstall = onInstallSourceSeparationModel,
+            onCancel = onCancelSourceSeparationModel,
+            onDelete = onDeleteSourceSeparationModel,
+        )
 
         Stage19ModelSettingsCards(
             language = language,

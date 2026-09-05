@@ -1,7 +1,6 @@
 package com.lingoplay.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DubbingPreferencePolicyTest {
@@ -27,6 +26,7 @@ class DubbingPreferencePolicyTest {
             dubbingMode = DubbingModePreset.SPEECH_FOCUS,
             subtitleMode = SubtitleMode.TRANSLATED,
             translationMode = TranslationMode.OFFLINE,
+            cleanBackgroundEnabled = true,
         )
         assertEquals(expected, expected.toRecord().toConfig())
     }
@@ -44,8 +44,14 @@ class DubbingPreferencePolicyTest {
     }
 
     @Test
-    fun cleanBackgroundRemainsUnavailableWithoutVerifiedEngine() {
-        assertTrue(!CleanBackgroundCapability.isAvailable)
-        assertEquals(SourceSeparationAvailability.UNAVAILABLE, CleanBackgroundCapability.engine.availability)
+    fun cleanBackgroundDefaultsOffForLegacyRecoveryRecords() {
+        val legacy = ProcessingConfigRecord(
+            sourceLanguage = SourceLanguageChoice.ENGLISH.name,
+            targetLanguage = TargetLanguageChoice.VIETNAMESE.name,
+            preferredVoiceId = null,
+            dubbingMode = DubbingModePreset.BALANCED.name,
+            subtitleMode = SubtitleMode.BILINGUAL.name,
+        ).toConfig()
+        assertEquals(false, legacy?.cleanBackgroundEnabled)
     }
 }

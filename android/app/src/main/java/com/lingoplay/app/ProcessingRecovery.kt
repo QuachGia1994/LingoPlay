@@ -105,6 +105,7 @@ object ProcessingCheckpointStore {
             put("translationMode", record.translationMode)
             put("speakerMode", record.speakerMode)
             put("voiceCloningEnabled", record.voiceCloningEnabled)
+            put("cleanBackgroundEnabled", record.cleanBackgroundEnabled)
             put("speakerVoiceMap", JSONObject().apply {
                 record.speakerVoiceMap.forEach { (speakerId, voiceId) -> put(speakerId, voiceId) }
             })
@@ -127,6 +128,7 @@ object ProcessingCheckpointStore {
             }
         }.orEmpty(),
         voiceCloningEnabled = json.optBoolean("voiceCloningEnabled", false),
+        cleanBackgroundEnabled = json.optBoolean("cleanBackgroundEnabled", false),
     ).toConfig()
 
     private fun checkpointFile(context: Context): File = File(File(context.filesDir, ROOT), FILE_NAME)

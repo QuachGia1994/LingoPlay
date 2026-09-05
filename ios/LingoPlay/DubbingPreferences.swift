@@ -126,6 +126,7 @@ struct ProcessingConfig: Sendable, Equatable {
     let speakerMode: SpeakerMode
     let speakerVoiceMap: [String: String]
     let voiceCloningEnabled: Bool
+    let cleanBackgroundEnabled: Bool
 
     func resuming(currentCloningConsent: Bool) -> ProcessingConfig {
         ProcessingConfig(
@@ -133,7 +134,8 @@ struct ProcessingConfig: Sendable, Equatable {
             preferredVoiceIdentifier: preferredVoiceIdentifier, dubbingMode: dubbingMode,
             subtitleMode: subtitleMode, translationMode: translationMode,
             speakerMode: speakerMode, speakerVoiceMap: speakerVoiceMap,
-            voiceCloningEnabled: voiceCloningEnabled && currentCloningConsent
+            voiceCloningEnabled: voiceCloningEnabled && currentCloningConsent,
+            cleanBackgroundEnabled: cleanBackgroundEnabled
         )
     }
 
@@ -146,7 +148,8 @@ struct ProcessingConfig: Sendable, Equatable {
         translationMode: TranslationMode = .cloud,
         speakerMode: SpeakerMode = .single,
         speakerVoiceMap: [String: String] = [:],
-        voiceCloningEnabled: Bool = false
+        voiceCloningEnabled: Bool = false,
+        cleanBackgroundEnabled: Bool = false
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
@@ -157,6 +160,7 @@ struct ProcessingConfig: Sendable, Equatable {
         self.speakerMode = speakerMode
         self.speakerVoiceMap = speakerVoiceMap
         self.voiceCloningEnabled = voiceCloningEnabled
+        self.cleanBackgroundEnabled = cleanBackgroundEnabled
     }
 }
 

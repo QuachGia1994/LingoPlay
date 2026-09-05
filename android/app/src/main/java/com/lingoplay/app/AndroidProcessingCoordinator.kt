@@ -8,6 +8,7 @@ import java.io.File
 
 internal enum class ProcessingFailureStep {
     AUDIO,
+    SEPARATION,
     ASR,
     DIARIZATION,
     TRANSLATION,
@@ -43,6 +44,7 @@ internal sealed interface ProcessingOutcome {
     data object ModelMissing : ProcessingOutcome
     data object SpeakerModelMissing : ProcessingOutcome
     data object CloningModelMissing : ProcessingOutcome
+    data object SourceSeparationModelMissing : ProcessingOutcome
     data object TranslationEndpointMissing : ProcessingOutcome
     data object VoiceMissing : ProcessingOutcome
     data class Failed(val step: ProcessingFailureStep, val message: String) : ProcessingOutcome
@@ -61,6 +63,9 @@ internal interface AndroidProcessingRuntime {
     suspend fun diarize(audioFile: File, model: SpeakerDiarizationModel): SpeakerDiarizationDocument
     suspend fun availableVoices(): List<OfflineVoiceOption>
     fun voiceCloningModelInstalled(): Boolean
+    fun sourceSeparationAvailable(): Boolean = false
+    suspend fun separateAudio(audioFile: File): SeparatedAudioStems =
+        throw IllegalStateException("Clean Background is unavailable.")
     suspend fun buildVoiceCloneReferences(audioFile: File, transcript: ASRTranscript): Map<String, VoiceCloneReference>
     suspend fun translate(
         transcript: ASRTranscript,
@@ -83,6 +88,14 @@ internal interface AndroidProcessingRuntime {
         mode: DubbingModePreset,
         onPhase: suspend (MixPhase) -> Unit,
     ): LocalDubMediaResult
+
+    suspend fun render(
+        media: LocalMediaItem,
+        dub: DubSpeechDocument,
+        mode: DubbingModePreset,
+        backgroundAudioFile: File?,
+        onPhase: suspend (MixPhase) -> Unit,
+    ): LocalDubMediaResult = render(media, dub, mode, onPhase)
 
     suspend fun save(
         media: LocalMediaItem,
@@ -129,6 +142,11 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
 
     override fun voiceCloningModelInstalled(): Boolean = VoiceCloningModelStore.find(context) != null
 
+    override fun sourceSeparationAvailable(): Boolean = CleanBackgroundCapability.isAvailable(context)
+
+    override suspend fun separateAudio(audioFile: File): SeparatedAudioStems =
+        CleanBackgroundCapability.engine(context).separate(audioFile)
+
     override suspend fun buildVoiceCloneReferences(
         audioFile: File,
         transcript: ASRTranscript,
@@ -174,6 +192,21 @@ internal class DefaultAndroidProcessingRuntime(private val context: Context) : A
         onPhase = onPhase,
     )
 
+    override suspend fun render(
+        media: LocalMediaItem,
+        dub: DubSpeechDocument,
+        mode: DubbingModePreset,
+        backgroundAudioFile: File?,
+        onPhase: suspend (MixPhase) -> Unit,
+    ): LocalDubMediaResult = TimelineMixService.render(
+        context = context,
+        media = media,
+        dub = dub,
+        mode = mode,
+        backgroundAudioFile = backgroundAudioFile,
+        onPhase = onPhase,
+    )
+
     override suspend fun save(
         media: LocalMediaItem,
         result: LocalDubMediaResult,
@@ -209,56 +242,91 @@ internal class AndroidProcessingCoordinator(
         reusableAudio: File?,
         config: ProcessingConfig,
         onEvent: suspend (ProcessingEvent) -> Unit,
-    ): ProcessingOutcome = try {
-        val audioFile = prepareAudio(media, reusableAudio, config, onEvent)
-            ?: return ProcessingOutcome.Failed(ProcessingFailureStep.AUDIO, "Audio preparation failed.")
-
-        val model = findWhisperModel() ?: return ProcessingOutcome.ModelMissing
-        val transcript = transcribe(audioFile, model, config, onEvent)
-            ?: return ProcessingOutcome.Failed(ProcessingFailureStep.ASR, "Speech recognition failed.")
-
-        val speakerResolution = resolveSpeakers(media, audioFile, transcript, config, onEvent)
-            ?: return ProcessingOutcome.SpeakerModelMissing
-        val annotatedTranscript = speakerResolution.transcript
-        val resolvedConfig = speakerResolution.config
-        val cloneReferences = if (
-            resolvedConfig.speakerMode == SpeakerMode.MULTI &&
-            resolvedConfig.voiceCloningEnabled &&
-            VoiceCloningPolicy.supportsPair(annotatedTranscript.language, resolvedConfig.targetLanguage.code) &&
-            VoiceCloningPolicy.eligibleReferenceSegments(annotatedTranscript).isNotEmpty()
-        ) {
-            if (!runtime.voiceCloningModelInstalled()) return ProcessingOutcome.CloningModelMissing
-            try {
-                runtime.buildVoiceCloneReferences(audioFile, annotatedTranscript)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                throw ProcessingStepException(ProcessingFailureStep.TTS, error.message ?: "Voice reference preparation failed.", error)
+    ): ProcessingOutcome {
+        var separatedStems: SeparatedAudioStems? = null
+        return try {
+            val audioFile = prepareAudio(media, reusableAudio, config, onEvent)
+                ?: return ProcessingOutcome.Failed(ProcessingFailureStep.AUDIO, "Audio preparation failed.")
+            val sources = if (config.cleanBackgroundEnabled) {
+                if (!runtime.sourceSeparationAvailable()) return ProcessingOutcome.SourceSeparationModelMissing
+                val stems = separateAudio(audioFile)
+                separatedStems = stems
+                ProcessingAudioSources(analysisAudio = stems.voice, backgroundAudio = stems.background)
+            } else {
+                ProcessingAudioSources(analysisAudio = audioFile, backgroundAudio = null)
             }
-        } else {
-            emptyMap()
+
+            val model = findWhisperModel() ?: return ProcessingOutcome.ModelMissing
+            val transcript = transcribe(sources.analysisAudio, model, config, onEvent)
+                ?: return ProcessingOutcome.Failed(ProcessingFailureStep.ASR, "Speech recognition failed.")
+
+            val speakerResolution = resolveSpeakers(media, audioFile, sources.analysisAudio, transcript, config, onEvent)
+                ?: return ProcessingOutcome.SpeakerModelMissing
+            val annotatedTranscript = speakerResolution.transcript
+            val resolvedConfig = speakerResolution.config
+            val cloneReferences = if (
+                resolvedConfig.speakerMode == SpeakerMode.MULTI &&
+                resolvedConfig.voiceCloningEnabled &&
+                VoiceCloningPolicy.supportsPair(annotatedTranscript.language, resolvedConfig.targetLanguage.code) &&
+                VoiceCloningPolicy.eligibleReferenceSegments(annotatedTranscript).isNotEmpty()
+            ) {
+                if (!runtime.voiceCloningModelInstalled()) return ProcessingOutcome.CloningModelMissing
+                try {
+                    runtime.buildVoiceCloneReferences(sources.analysisAudio, annotatedTranscript)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    throw ProcessingStepException(ProcessingFailureStep.TTS, error.message ?: "Voice reference preparation failed.", error)
+                }
+            } else {
+                emptyMap()
+            }
+
+            if (resolvedConfig.translationMode == TranslationMode.CLOUD && !translationConfigured) {
+                return ProcessingOutcome.TranslationEndpointMissing
+            }
+            val translation = translate(annotatedTranscript, resolvedConfig, onEvent)
+                ?.copy(speakerVoiceMap = resolvedConfig.speakerVoiceMap)
+                ?: return ProcessingOutcome.Failed(ProcessingFailureStep.TRANSLATION, "Translation failed.")
+
+            val dubOutcome = synthesize(translation, resolvedConfig, cloneReferences, onEvent)
+            if (dubOutcome.voiceMissing) return ProcessingOutcome.VoiceMissing
+            val dub = dubOutcome.document
+                ?: return ProcessingOutcome.Failed(
+                    ProcessingFailureStep.TTS,
+                    dubOutcome.errorMessage ?: "Offline speech synthesis failed.",
+                )
+
+            renderAndSave(media, translation, dub, resolvedConfig, sources.backgroundAudio, onEvent)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: ProcessingStepException) {
+            ProcessingOutcome.Failed(failure.step, failure.message)
+        } finally {
+            separatedStems?.cleanup()
         }
+    }
 
-        if (resolvedConfig.translationMode == TranslationMode.CLOUD && !translationConfigured) {
-            return ProcessingOutcome.TranslationEndpointMissing
+    private data class ProcessingAudioSources(
+        val analysisAudio: File,
+        val backgroundAudio: File?,
+    )
+
+    private suspend fun separateAudio(audioFile: File): SeparatedAudioStems = try {
+        runtime.record("source_separation_started")
+        runtime.separateAudio(audioFile).also {
+            currentCoroutineContext().ensureActive()
+            runtime.record("source_separation_completed")
         }
-        val translation = translate(annotatedTranscript, resolvedConfig, onEvent)
-            ?.copy(speakerVoiceMap = resolvedConfig.speakerVoiceMap)
-            ?: return ProcessingOutcome.Failed(ProcessingFailureStep.TRANSLATION, "Translation failed.")
-
-        val dubOutcome = synthesize(translation, resolvedConfig, cloneReferences, onEvent)
-        if (dubOutcome.voiceMissing) return ProcessingOutcome.VoiceMissing
-        val dub = dubOutcome.document
-            ?: return ProcessingOutcome.Failed(
-                ProcessingFailureStep.TTS,
-                dubOutcome.errorMessage ?: "Offline speech synthesis failed.",
-            )
-
-        renderAndSave(media, translation, dub, resolvedConfig, onEvent)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (failure: ProcessingStepException) {
-        ProcessingOutcome.Failed(failure.step, failure.message)
+    } catch (error: Throwable) {
+        runtime.record("source_separation_failed")
+        throw ProcessingStepException(
+            ProcessingFailureStep.SEPARATION,
+            error.message ?: "Clean Background source separation failed.",
+            error,
+        )
     }
 
     private suspend fun prepareAudio(
@@ -322,7 +390,8 @@ internal class AndroidProcessingCoordinator(
 
     private suspend fun resolveSpeakers(
         media: LocalMediaItem,
-        audioFile: File,
+        checkpointAudioFile: File,
+        analysisAudioFile: File,
         transcript: ASRTranscript,
         config: ProcessingConfig,
         onEvent: suspend (ProcessingEvent) -> Unit,
@@ -331,7 +400,7 @@ internal class AndroidProcessingCoordinator(
         val model = runtime.findSpeakerModel() ?: return null
         return try {
             onEvent(ProcessingEvent.DiarizationStarted)
-            val diarization = runtime.diarize(audioFile, model)
+            val diarization = runtime.diarize(analysisAudioFile, model)
             currentCoroutineContext().ensureActive()
             onEvent(ProcessingEvent.DiarizationReady(diarization))
             val annotated = SpeakerDiarizationPolicy.annotate(transcript, diarization)
@@ -344,7 +413,7 @@ internal class AndroidProcessingCoordinator(
             )
             val resolved = config.copy(speakerVoiceMap = mapping)
             currentCoroutineContext().ensureActive()
-            runtime.saveCheckpoint(media, audioFile, resolved)
+            runtime.saveCheckpoint(media, checkpointAudioFile, resolved)
             SpeakerResolution(annotated, resolved)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -426,9 +495,10 @@ internal class AndroidProcessingCoordinator(
         translation: TranslationDocument,
         dub: DubSpeechDocument,
         config: ProcessingConfig,
+        backgroundAudioFile: File?,
         onEvent: suspend (ProcessingEvent) -> Unit,
     ): ProcessingOutcome = try {
-        val rendered = runtime.render(media, dub, config.dubbingMode) { phase ->
+        val rendered = runtime.render(media, dub, config.dubbingMode, backgroundAudioFile) { phase ->
             onEvent(ProcessingEvent.MixChanged(phase))
         }
         currentCoroutineContext().ensureActive()

@@ -2,6 +2,7 @@
 android/.gradle/
 android/.kotlin/
 android/**/build/
+android/**/.cxx/
 android/local.properties
 android/app/libs/*.aar
 android/*.log

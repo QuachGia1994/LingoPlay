@@ -62,6 +62,17 @@
     "vocoderBytes": 54157409,
     "vocoderSha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0"
   },
+  "cleanBackground": {
+    "enabledByDefault": false,
+    "localOnly": true,
+    "bundledInBaseApp": false,
+    "referencePersistence": "ephemeral-current-run",
+    "archiveBytes": 35271738,
+    "archiveSha256": "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6",
+    "version": "spleeter-2stems-fp16-c6c5c430",
+    "runtime": "sherpa-onnx-1.13.7",
+    "stems": ["vocals", "accompaniment"]
+  },
   "offlineTranslation": {
     "modes": ["cloud", "offline"],
     "supportedLanguages": ["en", "vi", "ja", "zh"],

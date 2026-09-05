@@ -8,6 +8,6 @@ The contract intentionally covers only product semantics that are dangerous to d
 - playback-speed choices,
 - dubbing-mode duck floor, dub gain and fade duration,
 - Google Play / StoreKit Plus product identifiers,
-- whether Clean Background has a verified source-separation implementation.
+- Clean Background opt-in/model/runtime semantics and whether cross-device verification is complete.
 
 Runtime code remains Kotlin/Compose and Swift/SwiftUI. `scripts/verify_product_contract.py` compares both native implementations against this file and fails CI on drift. This is a parity guard, not a shared-runtime or code-generation layer.

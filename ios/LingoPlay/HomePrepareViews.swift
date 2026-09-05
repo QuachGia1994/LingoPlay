@@ -305,8 +305,11 @@ struct PrepareView: View {
                     PrepareSetting(
                         icon: "waveform.path.ecg",
                         title: "Clean Background",
-                        value: CleanBackgroundCapability.isAvailable ? "Ready" : "Unavailable",
-                        detail: CleanBackgroundCapability.isAvailable ? "Verified source-separation engine ready" : "No verified source-separation engine is bundled yet"
+                        value: model.cleanBackgroundEnabled ? "On" : "Off",
+                        detail: CleanBackgroundCapability.isAvailable
+                            ? "Uses local vocals/accompaniment separation"
+                            : "Install the verified local model in Settings before processing",
+                        action: { model.cleanBackgroundEnabled.toggle() }
                     )
                     Divider().overlay(LPTheme.border)
                     PrepareSetting(icon: "captions.bubble.fill", title: "Subtitles", value: model.subtitleMode.label, detail: "Player subtitle display mode", action: model.cycleSubtitleMode)

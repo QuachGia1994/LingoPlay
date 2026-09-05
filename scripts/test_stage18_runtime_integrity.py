@@ -4,6 +4,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 APP_MODEL = ROOT / "ios" / "LingoPlay" / "AppModel.swift"
 RECOVERY = ROOT / "ios" / "LingoPlay" / "ProcessingRecovery.swift"
+PROCESSING_RUN = ROOT / "ios" / "LingoPlay" / "ProcessingRun.swift"
 
 
 class Stage18RuntimeIntegrityTests(unittest.TestCase):
@@ -11,6 +12,7 @@ class Stage18RuntimeIntegrityTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.source = APP_MODEL.read_text(encoding="utf-8")
         cls.recovery = RECOVERY.read_text(encoding="utf-8")
+        cls.processing_run = PROCESSING_RUN.read_text(encoding="utf-8")
 
     def function_body(self, signature: str, next_signature: str) -> str:
         start = self.source.index(signature)
@@ -19,12 +21,12 @@ class Stage18RuntimeIntegrityTests(unittest.TestCase):
 
     def test_processing_run_has_tracked_task_and_identity(self) -> None:
         self.assertIn("private var processingTask: Task<Void, Never>?", self.source)
-        self.assertIn("private var activeProcessingRunID: UUID?", self.source)
-        self.assertIn("activeProcessingRunID == run.id", self.source)
-        self.assertIn("selectedMedia?.id == run.media.id", self.source)
+        self.assertIn("var activeProcessingRunID: UUID?", self.source)
+        self.assertIn("activeProcessingRunID == run.id", self.processing_run)
+        self.assertIn("selectedMedia?.id == run.media.id", self.processing_run)
 
     def test_begin_processing_uses_tracked_launcher(self) -> None:
-        body = self.function_body("    func beginProcessing() {", "    struct ProcessingRun")
+        body = self.function_body("    func beginProcessing() {", "    private func launchProcessing(")
         self.assertIn("launchProcessing(", body)
         self.assertNotIn("Task {", body)
 

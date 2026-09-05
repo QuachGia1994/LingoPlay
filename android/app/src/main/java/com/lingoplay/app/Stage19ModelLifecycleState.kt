@@ -30,6 +30,8 @@ internal class Stage19ModelLifecycleState(
         private set
     var cloningState by mutableStateOf<ModelInstallState>(VoiceCloningModelInstaller.state(appContext))
         private set
+    var sourceSeparationState by mutableStateOf<ModelInstallState>(SourceSeparationModelInstaller.state(appContext))
+        private set
     var downloadedTranslationModelCodes by mutableStateOf<Set<String>>(emptySet())
         private set
     var translationModelBusyCode by mutableStateOf<String?>(null)
@@ -41,6 +43,7 @@ internal class Stage19ModelLifecycleState(
     private var neuralJob: Job? = null
     private var speakerJob: Job? = null
     private var cloningJob: Job? = null
+    private var sourceSeparationJob: Job? = null
     private var translationModelJob: Job? = null
 
     val speechInstalled: Boolean
@@ -223,6 +226,38 @@ internal class Stage19ModelLifecycleState(
         runCatching { VoiceCloningModelInstaller.deleteInstalled(appContext) }
             .onSuccess { cloningState = ModelInstallState.NotInstalled }
             .onFailure { cloningState = ModelInstallState.Failed(it.message ?: "Unable to delete Voice Cloning models.") }
+    }
+
+    fun installSourceSeparation(wifiOnly: Boolean) {
+        if (sourceSeparationJob != null) return
+        sourceSeparationJob = scope.launch {
+            try {
+                SourceSeparationModelInstaller.install(appContext, wifiOnly) { progress ->
+                    withContext(Dispatchers.Main.immediate) { sourceSeparationState = progress }
+                }
+                sourceSeparationState = SourceSeparationModelInstaller.state(appContext)
+            } catch (cancelled: CancellationException) {
+                sourceSeparationState = SourceSeparationModelInstaller.state(appContext)
+                throw cancelled
+            } catch (error: Throwable) {
+                sourceSeparationState = ModelInstallState.Failed(error.message ?: "Clean Background installation failed.")
+            } finally {
+                sourceSeparationJob = null
+            }
+        }
+    }
+
+    fun cancelSourceSeparation() {
+        sourceSeparationJob?.cancel()
+    }
+
+    fun deleteSourceSeparation(canDelete: Boolean) {
+        if (!canDelete) return
+        sourceSeparationJob?.cancel()
+        sourceSeparationJob = null
+        runCatching { SourceSeparationModelInstaller.deleteInstalled(appContext) }
+            .onSuccess { sourceSeparationState = ModelInstallState.NotInstalled }
+            .onFailure { sourceSeparationState = ModelInstallState.Failed(it.message ?: "Unable to delete Clean Background model.") }
     }
 }
 

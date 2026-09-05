@@ -1,6 +1,6 @@
 # Visual foundation
 
-> updated 2026-09-04 · pre-release
+> updated 2026-09-05 · pre-release
 
 ## Product flow
 Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; model acquisition remains a separate explicit user action and never masquerades as splash progress.
@@ -38,7 +38,7 @@ Launch shell — branded splash with indeterminate "Preparing LingoPlay" state; 
 - Settings exposes persisted English / Tiếng Việt interface-language controls on both clients for the primary shell/navigation surfaces.
 - Settings exposes truthful Speech AI state/storage plus install/cancel/delete controls. Android shows byte progress for the pinned ~104 MB runtime set; iOS validates WhisperKit download/prewarm before activation.
 - iOS crown and Settings open one Plus sheet backed by StoreKit 2. Local StoreKit products may be absent without affecting free/pre-release capability access; verified StoreKit transactions are the only client-side Plus authority.
-- Prepare labels Clean Background as unavailable until a real cross-platform separator exists; Balanced mode describes normalization + adaptive ducking rather than implying stem separation.
+- Prepare exposes Clean Background as an explicit On/Off choice. When the runtime plus verified Spleeter model are installed it uses real local two-stem separation; otherwise processing fails closed with an install instruction. Balanced mode still describes the normal adaptive-ducking path when Clean Background is off.
 - Interrupted processing appears as one explicit Home recovery card backed by app-owned media/checkpoint files; Resume starts only when the user asks.
 - Android exposes explicit PiP from Player; iOS uses native AVPlayerViewController controls/PiP on the same AVPlayer.
 - Privacy diagnostics are intentionally invisible telemetry-wise: local bounded event codes only, no user content and no upload.
