@@ -79,20 +79,25 @@ object SystemVietnameseTTSService {
         onProgress: suspend (segment: Int, total: Int) -> Unit = { _, _ -> },
     ): DubSpeechDocument {
         val tts = createTts(context)
+        var sessionRoot: File? = null
+        var succeeded = false
         try {
             val voice = selectOfflineVoice(tts, document.targetLanguage, preferredVoiceName)
                 ?: throw OfflineTargetVoiceMissingException(document.targetLanguage)
             check(tts.setVoice(voice) == TextToSpeech.SUCCESS) { "Unable to select the offline system voice." }
 
             val root = File(context.cacheDir, "lingoplay/tts/${UUID.randomUUID()}").apply { mkdirs() }
+            sessionRoot = root
             val output = mutableListOf<DubSpeechSegment>()
             document.segments.forEachIndexed { index, segment ->
                 output += synthesizeSegment(tts, segment, root)
                 onProgress(index + 1, document.segments.size)
             }
+            succeeded = true
             return DubSpeechDocument(voice.name, output)
         } finally {
             withContext(Dispatchers.Main.immediate) { tts.shutdown() }
+            if (!succeeded) sessionRoot?.deleteRecursively()
         }
     }
 

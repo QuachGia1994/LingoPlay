@@ -129,8 +129,12 @@ function sanitizeSpeechText(value: string): string {
     .trim();
 }
 
+function normalizedBaseLanguage(value: string): string {
+  return value.trim().toLowerCase().split("-")[0] || "und";
+}
+
 function resolvedSourceLanguage(request: TranslationRequest): string {
-  const reported = request.sourceLanguage.trim().toLowerCase().split("-")[0] || "und";
+  const reported = normalizedBaseLanguage(request.sourceLanguage);
   const text = sanitizeSpeechText(request.segments.map((segment) => segment.text).join(" "));
   const letters = Array.from(text).filter((character) => /\p{L}/u.test(character));
   const latinLetters = letters.filter((character) => /[A-Za-z]/.test(character)).length;
@@ -155,7 +159,9 @@ function translatedTextFromWorkersAI(value: unknown): string | null {
 
 async function translateWithWorkersAI(request: TranslationRequest, ai: WorkersAI): Promise<ProviderResponse> {
   const sourceLanguage = resolvedSourceLanguage(request);
+  const targetLanguage = normalizedBaseLanguage(request.targetLanguage);
   if (sourceLanguage === "und") throw new Error("source_language_unknown");
+  if (targetLanguage === "und") throw new Error("target_language_unknown");
 
   const translations: ProviderTranslation[] = [];
   const concurrency = 8;
@@ -167,7 +173,7 @@ async function translateWithWorkersAI(request: TranslationRequest, ai: WorkersAI
       const response = await ai.run("@cf/meta/m2m100-1.2b", {
         text: sourceText,
         source_lang: sourceLanguage,
-        target_lang: request.targetLanguage,
+        target_lang: targetLanguage,
       });
       const text = translatedTextFromWorkersAI(response);
       if (!text) throw new Error("provider_invalid_shape");
@@ -204,13 +210,23 @@ async function translate(request: Request, env: Env): Promise<Response> {
   if (!validated.ok) return json({ error: validated.error }, 400);
 
   let normalized: ProviderResponse | null = null;
+  const resolvedSource = resolvedSourceLanguage(validated.data);
+  const normalizedTarget = normalizedBaseLanguage(validated.data.targetLanguage);
 
-  if (env.AI) {
+  if (resolvedSource !== "und" && resolvedSource === normalizedTarget) {
+    const translations: ProviderTranslation[] = [];
+    for (const segment of validated.data.segments) {
+      const text = sanitizeSpeechText(segment.text);
+      if (!text) return json({ error: "source_text_empty" }, 422);
+      translations.push({ id: segment.id, text });
+    }
+    normalized = { translations };
+  } else if (env.AI) {
     try {
       normalized = await translateWithWorkersAI(validated.data, env.AI);
     } catch (error) {
       const code = error instanceof Error ? error.message : "provider_failed";
-      if (code === "source_language_unknown" || code === "source_text_empty") return json({ error: code }, 422);
+      if (code === "source_language_unknown" || code === "target_language_unknown" || code === "source_text_empty") return json({ error: code }, 422);
       if (code === "provider_invalid_shape") return json({ error: code }, 502);
       return json({ error: "provider_unreachable" }, 502);
     }

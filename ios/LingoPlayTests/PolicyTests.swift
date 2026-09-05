@@ -2,6 +2,13 @@ import XCTest
 @testable import LingoPlay
 
 final class PolicyTests: XCTestCase {
+    func testHostAppHasResolvedVersionMetadata() throws {
+        let version = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        let build = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
+        XCTAssertNotNil(version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression))
+        XCTAssertNotNil(build.range(of: #"^[0-9]+(\.[0-9]+){0,2}$"#, options: .regularExpression))
+    }
+
     func testTranslationEndpointUsesValidOverride() {
         let override = "https://translation.example.test"
         XCTAssertEqual(
@@ -183,6 +190,7 @@ final class PolicyTests: XCTestCase {
     func testNeuralVoiceRequiresExplicitInstalledSelection() {
         XCTAssertEqual(
             TTSRoutingPolicy.route(
+                targetLanguage: "vi-VN",
                 preferredVoiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
                 neuralVoiceInstalled: true
             ),
@@ -190,13 +198,26 @@ final class PolicyTests: XCTestCase {
         )
         XCTAssertEqual(
             TTSRoutingPolicy.route(
+                targetLanguage: "vi",
                 preferredVoiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
                 neuralVoiceInstalled: false
             ),
             .system
         )
         XCTAssertEqual(
-            TTSRoutingPolicy.route(preferredVoiceIdentifier: nil, neuralVoiceInstalled: true),
+            TTSRoutingPolicy.route(
+                targetLanguage: "vi",
+                preferredVoiceIdentifier: nil,
+                neuralVoiceInstalled: true
+            ),
+            .system
+        )
+        XCTAssertEqual(
+            TTSRoutingPolicy.route(
+                targetLanguage: "ja",
+                preferredVoiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
+                neuralVoiceInstalled: true
+            ),
             .system
         )
     }

@@ -18,8 +18,16 @@ internal enum class TTSRoute {
 }
 
 internal object TTSRoutingPolicy {
-    fun route(preferredVoiceId: String?, neuralVoiceInstalled: Boolean): TTSRoute =
-        if (preferredVoiceId == NeuralVoicePackManifest.voiceId && neuralVoiceInstalled) {
+    fun route(
+        targetLanguage: String,
+        preferredVoiceId: String?,
+        neuralVoiceInstalled: Boolean,
+    ): TTSRoute =
+        if (
+            targetLanguage.substringBefore('-').equals("vi", ignoreCase = true) &&
+            preferredVoiceId == NeuralVoicePackManifest.voiceId &&
+            neuralVoiceInstalled
+        ) {
             TTSRoute.NEURAL
         } else {
             TTSRoute.SYSTEM
@@ -42,7 +50,13 @@ object OfflineDubbingTTSService {
         onProgress: suspend (segment: Int, total: Int) -> Unit,
     ): DubSpeechDocument {
         val neuralModel = NeuralVoiceModelStore.find(context)
-        return when (TTSRoutingPolicy.route(preferredVoiceId, neuralModel != null)) {
+        return when (
+            TTSRoutingPolicy.route(
+                targetLanguage = document.targetLanguage,
+                preferredVoiceId = preferredVoiceId,
+                neuralVoiceInstalled = neuralModel != null,
+            )
+        ) {
             TTSRoute.NEURAL -> NeuralVietnameseTTSService.synthesize(
                 context = context,
                 document = document,
@@ -85,15 +99,18 @@ object NeuralVietnameseTTSService {
             config = OfflineTtsConfig(model = modelConfig, silenceScale = 0.2f),
         )
         val root = File(context.cacheDir, "lingoplay/neural-tts/${UUID.randomUUID()}").apply { mkdirs() }
+        var succeeded = false
         try {
             val output = mutableListOf<DubSpeechSegment>()
             document.segments.forEachIndexed { index, segment ->
                 output += synthesizeSegment(tts, segment, root)
                 onProgress(index + 1, document.segments.size)
             }
+            succeeded = true
             DubSpeechDocument(NeuralVoicePackManifest.voiceId, output)
         } finally {
             tts.release()
+            if (!succeeded) root.deleteRecursively()
         }
     }
 

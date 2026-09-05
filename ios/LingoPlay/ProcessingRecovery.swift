@@ -4,6 +4,7 @@ struct ProcessingRecoveryCheckpoint: Sendable, Equatable {
     let media: LocalMediaItem
     let preparedAudioURL: URL?
     let config: ProcessingConfig?
+    let processingRunID: UUID?
 
     var canResumeFromAudio: Bool {
         guard let preparedAudioURL else { return false }
@@ -26,6 +27,7 @@ actor ProcessingRecoveryStore {
         let dubbingMode: String?
         let subtitleMode: String?
         let translationMode: String?
+        let processingRunID: UUID?
         let updatedAtEpochMs: Int64
     }
 
@@ -55,14 +57,16 @@ actor ProcessingRecoveryStore {
                 hasAudioTrack: record.hasAudioTrack
             ),
             preparedAudioURL: audio,
-            config: config(from: record)
+            config: config(from: record),
+            processingRunID: record.processingRunID
         )
     }
 
     func save(
         media: LocalMediaItem,
         preparedAudioURL: URL? = nil,
-        config: ProcessingConfig? = nil
+        config: ProcessingConfig? = nil,
+        processingRunID: UUID? = nil
     ) throws {
         guard fileManager.fileExists(atPath: media.localURL.path) else { return }
         let record = Record(
@@ -79,6 +83,7 @@ actor ProcessingRecoveryStore {
             dubbingMode: config?.dubbingMode.rawValue,
             subtitleMode: config?.subtitleMode.rawValue,
             translationMode: config?.translationMode.rawValue,
+            processingRunID: processingRunID,
             updatedAtEpochMs: Int64(Date().timeIntervalSince1970 * 1_000)
         )
         let data = try JSONEncoder().encode(record)
@@ -87,8 +92,9 @@ actor ProcessingRecoveryStore {
         try data.write(to: file, options: .atomic)
     }
 
-    func clear(deleteMedia: Bool) {
+    func clear(deleteMedia: Bool, expectedRunID: UUID? = nil) {
         let checkpoint = load()
+        if let expectedRunID, checkpoint?.processingRunID != expectedRunID { return }
         if let file = try? checkpointFile() { try? fileManager.removeItem(at: file) }
         if let audio = checkpoint?.preparedAudioURL { try? fileManager.removeItem(at: audio) }
         if deleteMedia, let media = checkpoint?.media, isOwnedImportedMedia(media.localURL) {

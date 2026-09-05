@@ -107,7 +107,11 @@ final class SystemVietnameseTTSService {
         }
         let root = try makeSessionDirectory()
         let synthesizer = AVSpeechSynthesizer()
-        defer { _ = synthesizer.stopSpeaking(at: .immediate) }
+        var succeeded = false
+        defer {
+            _ = synthesizer.stopSpeaking(at: .immediate)
+            if !succeeded { try? FileManager.default.removeItem(at: root) }
+        }
         var output: [DubSpeechSegment] = []
 
         for (index, segment) in document.segments.enumerated() {
@@ -121,6 +125,7 @@ final class SystemVietnameseTTSService {
             progress(index + 1, document.segments.count)
         }
 
+        succeeded = true
         return DubSpeechDocument(voiceIdentifier: voice.identifier, segments: output)
     }
 

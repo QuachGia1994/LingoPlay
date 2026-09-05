@@ -61,14 +61,21 @@ class NeuralVoicePolicyTest {
 
     @Test
     fun neuralRouteRequiresExplicitSelectionAndInstalledPack() {
-        assertEquals(TTSRoute.SYSTEM, TTSRoutingPolicy.route(null, neuralVoiceInstalled = true))
         assertEquals(
             TTSRoute.SYSTEM,
-            TTSRoutingPolicy.route(NeuralVoicePackManifest.voiceId, neuralVoiceInstalled = false),
+            TTSRoutingPolicy.route("vi", null, neuralVoiceInstalled = true),
+        )
+        assertEquals(
+            TTSRoute.SYSTEM,
+            TTSRoutingPolicy.route("vi", NeuralVoicePackManifest.voiceId, neuralVoiceInstalled = false),
         )
         assertEquals(
             TTSRoute.NEURAL,
-            TTSRoutingPolicy.route(NeuralVoicePackManifest.voiceId, neuralVoiceInstalled = true),
+            TTSRoutingPolicy.route("vi-VN", NeuralVoicePackManifest.voiceId, neuralVoiceInstalled = true),
+        )
+        assertEquals(
+            TTSRoute.SYSTEM,
+            TTSRoutingPolicy.route("ja", NeuralVoicePackManifest.voiceId, neuralVoiceInstalled = true),
         )
     }
 

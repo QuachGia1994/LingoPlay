@@ -117,11 +117,14 @@ final class AppModel {
     private var playbackTimeObserver: Any?
     private var modelInstallTask: Task<Void, Never>?
     var neuralVoiceInstallTask: Task<Void, Never>?
+    private var processingTask: Task<Void, Never>?
+    private var activeProcessingRunID: UUID?
     private var activeProcessingConfig: ProcessingConfig?
 
     func finishSplash() {
         stage = .home
         plusStore.start()
+        TTSCachePolicy.purgeAllSessions()
         Task {
             await refreshLibrary()
             await refreshModelState()
@@ -137,6 +140,8 @@ final class AppModel {
     }
 
     func importMedia(from url: URL) async {
+        let cancelledProcessingTask = cancelActiveProcessing()
+        await cancelledProcessingTask?.value
         let previousMedia = selectedMedia
         teardownPlayback()
         await processingRecoveryStore.clear(deleteMedia: true)
@@ -165,6 +170,7 @@ final class AppModel {
     }
 
     func cancelPreparation() {
+        cancelActiveProcessing()
         let media = selectedMedia
         selectedMedia = nil
         mediaState = .idle
@@ -194,30 +200,92 @@ final class AppModel {
         activeProcessingConfig = config
         stage = .processing
         pendingRecovery = nil
-        Task {
-            try? await processingRecoveryStore.save(media: selectedMedia, config: config)
-            await prepareAudio(config: config)
+        launchProcessing(
+            media: selectedMedia,
+            config: config,
+            preparedAudioURL: nil
+        )
+    }
+
+    private struct ProcessingRun {
+        let id: UUID
+        let media: LocalMediaItem
+        let config: ProcessingConfig
+    }
+
+    private func launchProcessing(
+        media: LocalMediaItem,
+        config: ProcessingConfig,
+        preparedAudioURL: URL?
+    ) {
+        cancelActiveProcessing()
+        let run = ProcessingRun(id: UUID(), media: media, config: config)
+        activeProcessingRunID = run.id
+        processingTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if activeProcessingRunID == run.id {
+                    processingTask = nil
+                    activeProcessingRunID = nil
+                }
+            }
+            try? await processingRecoveryStore.save(
+                media: run.media,
+                preparedAudioURL: preparedAudioURL,
+                config: run.config,
+                processingRunID: run.id
+            )
+            guard isActive(run) else { return }
+            if let preparedAudioURL {
+                await recognizeSpeech(from: preparedAudioURL, run: run)
+            } else {
+                await prepareAudio(run: run)
+            }
         }
     }
 
-    func prepareAudio(config: ProcessingConfig? = nil) async {
-        guard let selectedMedia else { return }
-        let runConfig = config ?? activeProcessingConfig ?? currentProcessingConfig()
-        activeProcessingConfig = runConfig
+    @discardableResult
+    private func cancelActiveProcessing() -> Task<Void, Never>? {
+        let task = processingTask
+        task?.cancel()
+        processingTask = nil
+        activeProcessingRunID = nil
+        return task
+    }
+
+    private func isActive(_ run: ProcessingRun) -> Bool {
+        activeProcessingRunID == run.id &&
+            !Task.isCancelled &&
+            stage == .processing &&
+            selectedMedia?.id == run.media.id
+    }
+
+    private func prepareAudio(run: ProcessingRun) async {
+        guard isActive(run) else { return }
+        activeProcessingConfig = run.config
         mediaState = .extractingAudio
         do {
-            let audioURL = try await mediaService.extractAudio(from: selectedMedia)
+            let audioURL = try await mediaService.extractAudio(from: run.media)
+            guard isActive(run) else { return }
             mediaState = .audioReady(audioURL)
-            try? await processingRecoveryStore.save(media: selectedMedia, preparedAudioURL: audioURL, config: runConfig)
+            try? await processingRecoveryStore.save(
+                media: run.media,
+                preparedAudioURL: audioURL,
+                config: run.config,
+                processingRunID: run.id
+            )
+            guard isActive(run) else { return }
             processingProgress = 0.2
-            await recognizeSpeech(from: audioURL, config: runConfig)
+            await recognizeSpeech(from: audioURL, run: run)
         } catch {
+            guard isActive(run) else { return }
             await diagnostics.record("audio_preparation_failed")
             mediaState = .failed(error.localizedDescription)
         }
     }
 
-    private func recognizeSpeech(from audioURL: URL, config: ProcessingConfig) async {
+    private func recognizeSpeech(from audioURL: URL, run: ProcessingRun) async {
+        guard isActive(run) else { return }
         guard let model = asrModelStore.whisperModel() else {
             asrState = .modelMissing
             modelInstallState = .notInstalled
@@ -229,122 +297,149 @@ final class AppModel {
             let transcript = try await speechRecognizer.transcribe(
                 audioURL: audioURL,
                 model: model,
-                sourceLanguageCode: config.sourceLanguage.code
+                sourceLanguageCode: run.config.sourceLanguage.code
             )
+            guard isActive(run) else { return }
             asrState = .completed(transcript)
             processingProgress = 0.4
-            await translateTranscript(transcript, config: config)
+            await translateTranscript(transcript, run: run)
         } catch {
+            guard isActive(run) else { return }
             await diagnostics.record("asr_failed")
             asrState = .failed(error.localizedDescription)
         }
     }
 
-    private func translateTranscript(_ transcript: ASRTranscript, config: ProcessingConfig) async {
+    private func translateTranscript(_ transcript: ASRTranscript, run: ProcessingRun) async {
         let updateProgress: @MainActor @Sendable (Int, Int) -> Void = { [weak self] item, total in
-            self?.translationState = .translating(batch: item, totalBatches: total)
+            guard let self, self.isActive(run) else { return }
+            translationState = .translating(batch: item, totalBatches: total)
             let ratio = total > 0 ? Double(item) / Double(total) : 0
-            self?.processingProgress = 0.4 + (0.2 * ratio)
+            processingProgress = 0.4 + (0.2 * ratio)
         }
 
         do {
             let document: TranslationDocument
-            switch config.translationMode {
+            switch run.config.translationMode {
             case .cloud:
                 guard let endpoint = translationEndpoint() else {
+                    guard isActive(run) else { return }
                     translationState = .endpointMissing
                     return
                 }
                 document = try await translationService.translate(
                     transcript: transcript,
-                    targetLanguage: config.targetLanguage.code,
+                    targetLanguage: run.config.targetLanguage.code,
                     endpoint: endpoint,
                     progress: updateProgress
                 )
             case .offline:
                 document = try await offlineTranslationService.translate(
                     transcript: transcript,
-                    targetLanguage: config.targetLanguage.code,
+                    targetLanguage: run.config.targetLanguage.code,
                     progress: updateProgress
                 )
             }
+            guard isActive(run) else { return }
             translationState = .completed(document)
             processingProgress = 0.6
-            await synthesizeOfflineSpeech(document, config: config)
+            await synthesizeOfflineSpeech(document, run: run)
         } catch {
+            guard isActive(run) else { return }
             await diagnostics.record("translation_failed")
             translationState = .failed(error.localizedDescription)
         }
     }
 
-    private func synthesizeOfflineSpeech(_ document: TranslationDocument, config: ProcessingConfig) async {
+    private func synthesizeOfflineSpeech(_ document: TranslationDocument, run: ProcessingRun) async {
+        guard isActive(run) else { return }
         do {
             ttsState = .synthesizing(segment: 0, totalSegments: document.segments.count)
             let dub = try await ttsService.synthesize(
                 document: document,
-                preferredVoiceIdentifier: config.preferredVoiceIdentifier
+                preferredVoiceIdentifier: run.config.preferredVoiceIdentifier
             ) { [weak self] segment, total in
-                self?.ttsState = .synthesizing(segment: segment, totalSegments: total)
+                guard let self, self.isActive(run) else { return }
+                ttsState = .synthesizing(segment: segment, totalSegments: total)
                 let ratio = total > 0 ? Double(segment) / Double(total) : 0
-                self?.processingProgress = 0.6 + (0.2 * ratio)
+                processingProgress = 0.6 + (0.2 * ratio)
+            }
+            guard isActive(run) else {
+                TTSCachePolicy.cleanup(document: dub)
+                return
             }
             ttsState = .completed(dub)
             processingProgress = 0.8
-            await renderDubbedMedia(dub, config: config)
+            await renderDubbedMedia(dub, translation: document, run: run)
         } catch TTSError.offlineVoiceMissing(_) {
+            guard isActive(run) else { return }
             await diagnostics.record("tts_voice_missing")
             ttsState = .voiceMissing
         } catch {
+            guard isActive(run) else { return }
             await diagnostics.record("tts_failed")
             ttsState = .failed(error.localizedDescription)
         }
     }
 
-    private func renderDubbedMedia(_ dub: DubSpeechDocument, config: ProcessingConfig) async {
-        guard let selectedMedia else { return }
+    private func renderDubbedMedia(
+        _ dub: DubSpeechDocument,
+        translation: TranslationDocument,
+        run: ProcessingRun
+    ) async {
+        defer { TTSCachePolicy.cleanup(document: dub) }
+        guard isActive(run) else { return }
         do {
             let result = try await timelineMixService.render(
-                media: selectedMedia,
+                media: run.media,
                 dub: dub,
-                mode: config.dubbingMode
+                mode: run.config.dubbingMode
             ) { [weak self] state in
-                self?.mixState = state
+                guard let self, self.isActive(run) else { return }
+                mixState = state
                 switch state {
                 case .renderingAudio:
-                    self?.processingProgress = 0.85
+                    processingProgress = 0.85
                 case .remuxing:
-                    self?.processingProgress = 0.92
+                    processingProgress = 0.92
                 case .completed:
-                    self?.processingProgress = 1.0
+                    processingProgress = 1.0
                 case .idle, .failed:
                     break
                 }
             }
-            let translation: TranslationDocument?
-            if case .completed(let document) = translationState {
-                translation = document
-            } else {
-                translation = nil
-            }
+            guard isActive(run) else { return }
             let saved = try await libraryStore.save(
-                media: selectedMedia,
+                media: run.media,
                 result: result,
                 translation: translation,
-                dubbingMode: config.dubbingMode
+                dubbingMode: run.config.dubbingMode
             )
-            await processingRecoveryStore.clear(deleteMedia: false)
+            guard isActive(run) else {
+                try? await libraryStore.delete(saved)
+                return
+            }
+            await processingRecoveryStore.clear(deleteMedia: false, expectedRunID: run.id)
             pendingRecovery = nil
             await diagnostics.record("processing_completed")
             activeLibraryItem = saved
             activeLibraryURL = await libraryStore.videoURL(for: saved)
             await refreshLibrary()
+            guard isActive(run) else { return }
             processedMedia = result
             mixState = .completed(result)
             processingProgress = 1.0
-            try await configurePlayback(with: result, dub: dub, mode: config.dubbingMode)
+            try await configurePlayback(
+                with: result,
+                dub: dub,
+                media: run.media,
+                mode: run.config.dubbingMode
+            )
+            guard isActive(run) else { return }
             activeProcessingConfig = nil
             stage = .player
         } catch {
+            guard isActive(run) else { return }
             await diagnostics.record("mix_failed")
             mixState = .failed(error.localizedDescription)
         }
@@ -385,10 +480,17 @@ final class AppModel {
                     }
                 }
                 await refreshModelState()
-                if case .audioReady(let audioURL) = mediaState, asrState == .modelMissing {
+                if case .audioReady(let audioURL) = mediaState,
+                   asrState == .modelMissing,
+                   stage == .processing,
+                   let media = selectedMedia {
                     let config = activeProcessingConfig ?? currentProcessingConfig()
                     activeProcessingConfig = config
-                    await recognizeSpeech(from: audioURL, config: config)
+                    launchProcessing(
+                        media: media,
+                        config: config,
+                        preparedAudioURL: audioURL
+                    )
                 }
             } catch is CancellationError {
                 await refreshModelState()
@@ -420,10 +522,18 @@ final class AppModel {
         stage = .processing
         if let audioURL = recovery.preparedAudioURL, recovery.canResumeFromAudio {
             mediaState = .audioReady(audioURL)
-            Task { await recognizeSpeech(from: audioURL, config: config) }
+            launchProcessing(
+                media: recovery.media,
+                config: config,
+                preparedAudioURL: audioURL
+            )
         } else {
             mediaState = .ready
-            Task { await prepareAudio(config: config) }
+            launchProcessing(
+                media: recovery.media,
+                config: config,
+                preparedAudioURL: nil
+            )
         }
     }
 
@@ -525,13 +635,17 @@ final class AppModel {
         seekPlayback(to: min(max(playbackPosition + seconds, 0), playbackDuration))
     }
 
-    private func configurePlayback(with result: LocalDubMediaResult, dub: DubSpeechDocument, mode: DubbingModePreset) async throws {
-        guard let selectedMedia else { return }
+    private func configurePlayback(
+        with result: LocalDubMediaResult,
+        dub: DubSpeechDocument,
+        media: LocalMediaItem,
+        mode: DubbingModePreset
+    ) async throws {
         teardownPlayback()
         try preparePlaybackAudioSession()
 
         let session = try await timelineMixService.makePlaybackSession(
-            media: selectedMedia,
+            media: media,
             dubbedAudioURL: result.dubbedAudioURL,
             speechSegments: dub.segments,
             blend: audioBlend,
@@ -632,6 +746,7 @@ final class AppModel {
     func returnHome() {
         let previousStage = stage
         let mediaToRelease = selectedMedia
+        let cancelledProcessingTask = previousStage == .processing ? cancelActiveProcessing() : nil
         if previousStage == .player {
             teardownPlayback()
             if activeLibraryItem != nil {
@@ -646,7 +761,11 @@ final class AppModel {
         }
         selectedTab = .home
         if previousStage == .processing {
-            Task { pendingRecovery = await processingRecoveryStore.load() }
+            Task { [weak self] in
+                await cancelledProcessingTask?.value
+                guard let self else { return }
+                pendingRecovery = await processingRecoveryStore.load()
+            }
         }
         stage = .home
     }

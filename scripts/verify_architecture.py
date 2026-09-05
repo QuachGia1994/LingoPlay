@@ -30,7 +30,7 @@ for path in legacy:
     require(not path.exists(), f"legacy god-file removed: {path.relative_to(ROOT)}")
 
 size_under("android/app/src/main/java/com/lingoplay/app/LingoPlayApp.kt", 40_000)
-size_under("ios/LingoPlay/AppModel.swift", 25_000)
+size_under("ios/LingoPlay/AppModel.swift", 30_000)
 
 android_ui = [
     "LingoPlayHomeScreens.kt",
@@ -71,6 +71,11 @@ require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/AndroidProce
 ios_model = (ROOT / "ios/LingoPlay/AppModel.swift").read_text(encoding="utf-8")
 require(re.search(r"\bstruct\s+\w+View\b", ios_model) is None, "iOS AppModel contains no SwiftUI view structs")
 require("DubbingPreferencePolicy.availableOfflineVoices()" not in ios_model, "iOS preference presentation extracted from AppModel core")
+require("private var processingTask: Task<Void, Never>?" in ios_model, "iOS processing task is explicitly tracked")
+require("private var activeProcessingRunID: UUID?" in ios_model, "iOS processing run identity is tracked")
+require("selectedMedia?.id == run.media.id" in ios_model, "iOS stale processing runs cannot mutate a replacement media item")
+require("await cancelledProcessingTask?.value" in ios_model, "iOS Back waits for cancelled processing before loading recovery")
+require("expectedRunID: run.id" in ios_model, "iOS completion clears only its own recovery checkpoint")
 
 prefs_extension = ROOT / "ios/LingoPlay/AppModel+Preferences.swift"
 playback_extension = ROOT / "ios/LingoPlay/AppModel+PlaybackPresentation.swift"
@@ -79,6 +84,11 @@ require((ROOT / "ios/LingoPlay/AppModel+NeuralVoice.swift").is_file(), "iOS neur
 require(playback_extension.is_file(), "iOS playback presentation extension exists")
 require((ROOT / "ios/LingoPlay/PlaybackPresentationPolicy.swift").is_file(), "iOS playback presentation policy exists")
 require((ROOT / "android/app/src/main/java/com/lingoplay/app/PlayerInteractionPolicy.kt").is_file(), "Android player interaction policy exists")
+android_player = (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPlayPlayerScreen.kt").read_text(encoding="utf-8")
+require("DisposableEffect(videoView)" not in android_player, "Android player cleanup is not keyed by a nullable mutable view")
+require("onRelease = { releasedView" in android_player and "releasedView.stopPlayback()" in android_player, "AndroidView owns playback release")
+require("key(processed.remuxedVideoFile.absolutePath)" in android_player, "Android player lifetime follows media identity")
+require((ROOT / "android/app/src/androidTest/java/com/lingoplay/app/PlayerLifecycleDeviceTest.kt").is_file(), "Android real-player lifecycle regression exists")
 require((ROOT / "ios/LingoPlayTests/PolicyTests.swift").is_file(), "iOS policy unit tests exist")
 home_prepare = (ROOT / "ios/LingoPlay/HomePrepareViews.swift").read_text(encoding="utf-8")
 model_acquisition = (ROOT / "ios/LingoPlay/ModelAcquisition.swift").read_text(encoding="utf-8")
@@ -122,6 +132,10 @@ require("Verify translation backend wiring" in ios_workflow, "iOS CI fails close
 ios_info = (ROOT / "ios/LingoPlay/Info.plist").read_text(encoding="utf-8")
 require("LingoPlayTranslationAPIBaseURL" in ios_info, "iOS source Info.plist declares translation endpoint key")
 require("$(LINGOPLAY_TRANSLATION_API_BASE_URL)" in ios_info, "iOS source Info.plist expands translation endpoint build setting")
+for field, setting in (("CFBundleVersion", "CURRENT_PROJECT_VERSION"), ("CFBundleShortVersionString", "MARKETING_VERSION")):
+    require(field in ios_info and f"$({setting})" in ios_info, f"iOS source plist expands {field}")
+    require(f"{setting}:" in project_spec, f"iOS project supplies {setting}")
+require("test_ios_bundle_metadata.py" in ios_workflow, "iOS CI runs bundle metadata regression tests")
 require(
     'LINGOPLAY_TRANSLATION_API_BASE_URL: "https://lingoplay-api.kim-phong619.workers.dev"' in project_spec,
     "iOS project has deterministic public production endpoint default",
@@ -150,7 +164,7 @@ require("pod 'GoogleMLKit/Translate', '8.0.0'" in ios_podfile, "iOS pins officia
 require("cocoapods -v 1.16.2" in ios_workflow and "pod install" in ios_workflow, "iOS CI pins CocoaPods and installs pods")
 require("-workspace ios/LingoPlay.xcworkspace" in ios_workflow, "iOS CI builds the CocoaPods workspace")
 require("-project ios/LingoPlay.xcodeproj" not in ios_workflow, "iOS CI does not bypass CocoaPods integration")
-require("switch config.translationMode" in ios_model, "iOS translation route is explicit")
+require("switch run.config.translationMode" in ios_model, "iOS translation route is explicit and bound to the immutable processing run")
 require("config.translationMode == TranslationMode.CLOUD && !translationConfigured" in android_coordinator, "Android cloud endpoint gate is mode-aware")
 for name, source in (("Android", android_offline_translation), ("iOS", ios_offline_translation)):
     require("will not switch to cloud automatically" in source, f"{name} offline route fails closed")
@@ -158,6 +172,7 @@ for name, source in (("Android", android_offline_translation), ("iOS", ios_offli
     require("downloadedCodes" in source and "missing" in source, f"{name} checks installed models before inference")
 require("translationMode" in android_recovery, "Android recovery preserves translation mode")
 require("translationMode" in ios_recovery, "iOS recovery preserves translation mode")
+require("processingRunID" in ios_recovery and "expectedRunID" in ios_recovery, "iOS recovery clear is scoped to processing run identity")
 require("Powered by Google Translate" in (ROOT / "android/app/src/main/java/com/lingoplay/app/LingoPlayProcessingScreen.kt").read_text(encoding="utf-8"), "Android translation output shows Google attribution")
 require("Powered by Google Translate" in (ROOT / "ios/LingoPlay/ProcessingView.swift").read_text(encoding="utf-8"), "iOS translation output shows Google attribution")
 android_tts = (ROOT / "android/app/src/main/java/com/lingoplay/app/TextToSpeech.kt").read_text(encoding="utf-8")
@@ -233,8 +248,19 @@ require(
 )
 for name, source in (("Android", android_neural_runtime), ("iOS", ios_neural_runtime)):
     require("TTSRoutingPolicy" in source, f"{name} neural voice routing policy exists")
+    require("targetLanguage" in source, f"{name} neural route is target-language aware")
     require("SYSTEM" in source or ".system" in source, f"{name} keeps system voice fallback")
     require("threadCount" in source, f"{name} bounds neural CPU threads")
+require("normalized in supportedCodes" in android_offline_translation, "Android offline translation rejects unsupported detected languages")
+require((ROOT / "android/app/src/main/java/com/lingoplay/app/TTSCachePolicy.kt").is_file(), "Android TTS cache cleanup policy exists")
+require((ROOT / "ios/LingoPlay/TTSCachePolicy.swift").is_file(), "iOS TTS cache cleanup policy exists")
+require("TTSCachePolicy.cleanup(dub)" in android_coordinator, "Android processing cleans TTS session files after mix")
+require("defer { TTSCachePolicy.cleanup(document: dub) }" in ios_model, "iOS processing cleans TTS session files after mix")
+require("requestTimeoutSeconds" in translation_source, "iOS cloud translation has an explicit finite request timeout")
+require("normalizedBaseLanguage" in backend_source, "backend normalizes BCP-47 language tags before Workers AI")
+require("resolvedSource === normalizedTarget" in backend_source, "backend same-language translation bypasses provider inference")
+require("Backend translation tests" in android_workflow, "Android CI executes backend translation regression tests")
+require("test_stage18_runtime_integrity.py" in ios_workflow, "iOS CI executes Stage 18 runtime-integrity source regressions")
 require(
     "assetManager = null" in android_neural_runtime,
     "Android neural runtime loads absolute model paths without AssetManager",

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import plistlib
+import re
 import subprocess
 from pathlib import Path
 
@@ -68,6 +69,17 @@ def uuid_set(path: Path) -> set[str]:
     return values
 
 
+def validate_bundle_versions(info: dict[str, object]) -> None:
+    patterns = {
+        "CFBundleShortVersionString": r"[0-9]+\.[0-9]+\.[0-9]+",
+        "CFBundleVersion": r"[0-9]+(?:\.[0-9]+){0,2}",
+    }
+    for key, pattern in patterns.items():
+        value = info.get(key)
+        if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
+            raise ValueError(f"{key} must be a resolved numeric version string, got {value!r}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=Path)
@@ -83,6 +95,10 @@ def main() -> int:
 
     with (app / "Info.plist").open("rb") as handle:
         info = plistlib.load(handle)
+    try:
+        validate_bundle_versions(info)
+    except ValueError as error:
+        raise SystemExit(f"FAIL iOS binary: {error}") from error
     executable_name = info.get("CFBundleExecutable")
     executable = app / str(executable_name)
     if not executable.is_file():
@@ -93,6 +109,8 @@ def main() -> int:
     def emit(message: str) -> None:
         print(message)
         lines.append(message)
+
+    emit(f"PASS bundled app version={info['CFBundleShortVersionString']} build={info['CFBundleVersion']}")
 
     if args.translation_base_url is not None:
         expected_endpoint = args.translation_base_url.strip()

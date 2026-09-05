@@ -126,6 +126,7 @@ enum TranslationState: Equatable {
 
 enum TranslationError: LocalizedError {
     case endpointMissing
+    case noSpeechSegments
     case invalidResponse
     case server(Int, String)
 
@@ -133,6 +134,8 @@ enum TranslationError: LocalizedError {
         switch self {
         case .endpointMissing:
             "Translation backend is not configured."
+        case .noSpeechSegments:
+            "No translatable speech remains after removing non-speech markers."
         case .invalidResponse:
             "Translation backend returned an invalid response."
         case let .server(status, message):
@@ -142,6 +145,8 @@ enum TranslationError: LocalizedError {
 }
 
 struct TranslationService: Sendable {
+    static let requestTimeoutSeconds: TimeInterval = 60
+
     private struct RequestBody: Codable {
         let sourceLanguage: String
         let targetLanguage: String
@@ -176,12 +181,36 @@ struct TranslationService: Sendable {
         progress: @MainActor @Sendable (Int, Int) -> Void
     ) async throws -> TranslationDocument {
         let sourceSegments = Self.makeSourceSegments(transcript)
-        guard !sourceSegments.isEmpty else { throw TranslationError.invalidResponse }
+        guard !sourceSegments.isEmpty else { throw TranslationError.noSpeechSegments }
         let sourceText = sourceSegments.map(\.text).joined(separator: " ")
         let sourceLanguage = TranslationTextPolicy.sourceLanguage(
             reported: transcript.language,
             text: sourceText
         )
+        let targetBaseLanguage = targetLanguage
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(separator: "-")
+            .first
+            .map(String.init) ?? ""
+        if sourceLanguage == targetBaseLanguage {
+            let copied = sourceSegments.map { source in
+                TranslationSegment(
+                    id: source.id,
+                    startMs: source.startMs,
+                    endMs: source.endMs,
+                    sourceText: source.text,
+                    translatedText: source.text
+                )
+            }
+            await progress(copied.count, copied.count)
+            return TranslationDocument(
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
+                segments: copied,
+                mode: .cloud
+            )
+        }
         let batches = Self.makeBatches(sourceSegments)
         var translatedByID: [String: String] = [:]
 
@@ -233,6 +262,7 @@ struct TranslationService: Sendable {
         )
         var request = URLRequest(url: endpoint.appendingPathComponent("v1/translate"))
         request.httpMethod = "POST"
+        request.timeoutInterval = Self.requestTimeoutSeconds
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
 

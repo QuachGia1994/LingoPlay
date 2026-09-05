@@ -133,6 +133,19 @@ object TranslationService {
         check(sourceSegments.isNotEmpty()) { "No translatable speech remains after removing non-speech markers." }
         val sourceText = sourceSegments.joinToString(" ") { it.text }
         val sourceLanguage = TranslationTextPolicy.sourceLanguage(transcript.language, sourceText)
+        val targetBaseLanguage = targetLanguage.trim().lowercase().substringBefore('-')
+        if (sourceLanguage == targetBaseLanguage) {
+            val copied = sourceSegments.map { source ->
+                TranslationSegment(source.id, source.startMs, source.endMs, source.text, source.text)
+            }
+            onProgress(copied.size, copied.size)
+            return@withContext TranslationDocument(
+                sourceLanguage,
+                targetLanguage,
+                copied,
+                TranslationMode.CLOUD,
+            )
+        }
         val batches = TranslationBatching.batches(sourceSegments)
         val translatedById = linkedMapOf<String, String>()
 

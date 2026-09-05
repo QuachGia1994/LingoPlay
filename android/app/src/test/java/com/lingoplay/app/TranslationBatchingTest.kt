@@ -1,6 +1,7 @@
 package com.lingoplay.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,6 +60,13 @@ class TranslationBatchingTest {
     fun `offline route requires downloadable models without cloud fallback`() {
         assertEquals(setOf("vi"), OfflineTranslationLanguagePolicy.requiredModelCodes("en-US", "vi"))
         assertEquals(emptySet<String>(), OfflineTranslationLanguagePolicy.requiredModelCodes("ja", "ja"))
+        val unsupported = assertThrows(IllegalArgumentException::class.java) {
+            OfflineTranslationLanguagePolicy.requiredModelCodes("ko", "vi")
+        }
+        assertTrue(unsupported.message.orEmpty().contains("does not support"))
+        assertThrows(IllegalArgumentException::class.java) {
+            OfflineTranslationLanguagePolicy.requiredModelCodes("ko", "ko")
+        }
     }
 
     @Test

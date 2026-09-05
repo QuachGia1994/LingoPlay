@@ -354,6 +354,7 @@ fun LingoPlayApp() {
     }
 
     LaunchedEffect(Unit) {
+        TTSCachePolicy.purgeAllSessions(context)
         plusStore.start()
         libraryItems = LocalLibraryStore.load(context)
         pendingRecovery = ProcessingCheckpointStore.load(context)

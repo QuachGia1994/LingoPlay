@@ -1,6 +1,6 @@
 # System architecture
 
-> updated 2026-09-04 · pre-release
+> updated 2026-09-05 · 263d28d
 
 ## Goal
 Keep the heavy media path local while exposing a small server boundary for translation/provider access and entitlement state.
@@ -70,6 +70,7 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 
 ## Stage 11 lifecycle boundary
 - Both clients copy selected video into app-owned local storage before processing and persist a small local recovery checkpoint. The checkpoint also carries the immutable processing configuration (source/target language, preferred voice, dubbing mode, subtitle mode), so Resume cannot silently adopt Settings changed after the original run began. If the process is interrupted, Home offers Resume/Discard; resume uses prepared audio when it still exists and otherwise restarts from the owned source video.
+- Android playback lifetime is keyed by the final MP4 path. `AndroidView.onRelease` stops only the view leaving composition; publishing the initial nullable view reference and normal recomposition never stop playback. Changing files creates a fresh player with fresh readiness/position state. Physical-device Compose tests exercise initial play, repeated entry, speed changes and file replacement.
 - Android Picture-in-Picture uses the same Activity/VideoView playback path. iOS playback uses `AVPlayerViewController` with Picture-in-Picture enabled on the same AVPlayer and a playback audio session.
 - Recovery is the guarantee; unlimited background inference is not. No long-running WorkManager/BGProcessing architecture is presented as guaranteed immediate execution.
 
@@ -143,7 +144,17 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Cloud retains the transcript-only Cloudflare request path. Offline uses Google ML Kit Translation pinned to Android 17.0.3 and the official iOS CocoaPod 8.0.0 for `en`, `vi`, `ja`, and `zh`; media and transcript input/output stay on-device during inference.
 - English support is built in; optional Vietnamese/Japanese/Chinese models are downloaded/deleted only from Settings and checked before inference. Missing source/target models stop with a visible error. Same-language translation is a local identity transform.
 - ML Kit remains proprietary related software and may contact Google for model/runtime updates plus performance/utilization metrics. Settings/About disclose this, and offline translated text is rendered with visible Google Translate attribution.
+- The built iOS app must contain resolved numeric `CFBundleVersion` and `CFBundleShortVersionString` values from the existing pre-release identity (`0.0.0`, build `1`). MLKitCommon 13.0.0 reads these before its legacy CFBundle fallback; empty metadata must fail host-app tests and the Release bundle verifier before an IPA is accepted.
 - iOS CI generates the Xcode project, installs CocoaPods 1.16.2, resolves `GoogleMLKit/Translate` 8.0.0, and builds/tests the workspace. Source gates reject bypassing the Pods workspace or reintroducing an implicit cloud route.
 
+## Stage 18.5 runtime-integrity boundary
+- iOS processing is one tracked task per run with a UUID run identity plus immutable media/config snapshot. Back/import/recovery replacement cancels the old task, and every async stage/progress callback rejects stale run IDs before mutating state, saving Library output, clearing recovery, or navigating.
+- iOS recovery records an optional processing run ID. Completion clears only the checkpoint owned by that run, preventing an older cancelled job from deleting a newer retry checkpoint, including retries of the same source media.
+- Neural TTS routing is target-language aware on both platforms: the downloadable VAIS1000 path is eligible only for Vietnamese output. A stale neural voice preference on EN/JA/ZH routes to an installed system voice instead of entering the Vietnamese-only engine.
+- Android Offline translation rejects detected languages outside the product-supported EN/VI/JA/ZH set before model lookup, so users are never told to install an unsupported model that Settings cannot offer.
+- Cloud translation normalizes source/target BCP-47 tags to base language codes before Workers AI and short-circuits same-language jobs locally. iOS cloud requests use an explicit 60-second request timeout and cue-only transcripts fail as local no-speech instead of a fabricated backend-response error.
+- System/neural TTS UUID session files are transient. Failed synthesis deletes its own session immediately, successful processing deletes generated clips after timeline mix/playback-session construction, and cold start removes stale TTS sessions left by interrupted processes.
+- Stage 18.5 does not add speculative Android non-AAC transcoding or change the measured duration-overlap policy without a failing real-media fixture; those remain evidence-driven follow-ups rather than unverified rewrites.
+
 ## Current stage
-Stages 1–15.7 are implemented, with Stage 16 physical end-to-end evidence still incomplete. Stage 17.1 source integration adds the optional verified Vietnamese neural-voice path without changing the transcript-only backend or local media boundary. Android compilation/unit gates run on Windows; macOS/iOS CI remains the authoritative Swift build gate, and Stage 17 closure still requires physical Android+iPhone neural-output/performance evidence. Home and Library remain backed by real saved outputs; final exported media preserves original soundtrack/BGM/SFX. Clean Background/source separation is intentionally unavailable rather than simulated.
+Stage 18 is active. Stage 18.4 closes the observed Android cold-start player lifecycle regression and hardens iOS bundle metadata for ML Kit model installation; Stage 18.5 closes the audited processing-run, language-routing, translation-liveness, and transient-TTS-storage risks. Android source/build/package gates run locally on Windows; macOS/iOS CI remains the authoritative Swift compile/unit/Release gate, and replacement-iPhone evidence is still required before Stage 18 is closed. Home and Library remain backed by real saved outputs; final exported media preserves original soundtrack/BGM/SFX. Clean Background/source separation is intentionally unavailable rather than simulated.

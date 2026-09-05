@@ -78,7 +78,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -139,13 +139,15 @@ internal fun PlayerScreen(
         }
 
         if (processed != null) {
-            SingleClockDubPlayer(
-                processed = processed,
-                translation = translation,
-                subtitleMode = subtitleMode,
-                playbackSpeed = playbackSpeed,
-                onPipAvailabilityChange = { pipAvailable = it },
-            )
+            key(processed.remuxedVideoFile.absolutePath) {
+                SingleClockDubPlayer(
+                    processed = processed,
+                    translation = translation,
+                    subtitleMode = subtitleMode,
+                    playbackSpeed = playbackSpeed,
+                    onPipAvailabilityChange = { pipAvailable = it },
+                )
+            }
         } else {
             VideoPlaceholder(250.dp)
             LpCard {
@@ -221,15 +223,6 @@ private fun SingleClockDubPlayer(
         }
     }
 
-    DisposableEffect(videoView) {
-        onDispose {
-            onPipAvailabilityChange(false)
-            mediaPlayer = null
-            videoView?.pause()
-            videoView?.stopPlayback()
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -241,7 +234,6 @@ private fun SingleClockDubPlayer(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 VideoView(ctx).apply {
-                    setVideoPath(processed.remuxedVideoFile.absolutePath)
                     setOnPreparedListener { player ->
                         mediaPlayer = player
                         videoReady = true
@@ -252,7 +244,19 @@ private fun SingleClockDubPlayer(
                         onPipAvailabilityChange(false)
                         currentMs = processed.durationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                     }
+                    setVideoPath(processed.remuxedVideoFile.absolutePath)
                 }
+            },
+            onReset = null,
+            onRelease = { releasedView ->
+                releasedView.setOnPreparedListener(null)
+                releasedView.setOnCompletionListener(null)
+                releasedView.stopPlayback()
+                videoView = null
+                mediaPlayer = null
+                videoReady = false
+                isPlaying = false
+                onPipAvailabilityChange(false)
             },
             update = { view -> videoView = view },
         )

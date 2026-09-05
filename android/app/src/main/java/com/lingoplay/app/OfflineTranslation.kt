@@ -24,16 +24,22 @@ object OfflineTranslationLanguagePolicy {
         else -> code.uppercase()
     }
 
-    fun mlKitLanguage(code: String): String = TranslateLanguage.fromLanguageTag(normalized(code))
-        ?.takeIf { it in TranslateLanguage.getAllLanguages() }
-        ?: throw IllegalArgumentException("Offline translation does not support ${displayName(code)}.")
+    fun mlKitLanguage(code: String): String {
+        val normalized = normalized(code)
+        require(normalized in supportedCodes) {
+            "Offline translation does not support ${displayName(code)}."
+        }
+        return TranslateLanguage.fromLanguageTag(normalized)
+            ?.takeIf { it in TranslateLanguage.getAllLanguages() }
+            ?: throw IllegalArgumentException("Offline translation does not support ${displayName(code)}.")
+    }
 
     fun requiredModelCodes(sourceLanguage: String, targetLanguage: String): Set<String> {
         val source = normalized(sourceLanguage)
         val target = normalized(targetLanguage)
-        if (source == target) return emptySet()
         mlKitLanguage(source)
         mlKitLanguage(target)
+        if (source == target) return emptySet()
         return setOf(source, target).filterTo(linkedSetOf()) { it != "en" }
     }
 

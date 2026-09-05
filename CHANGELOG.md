@@ -4,6 +4,15 @@ All notable changes to LingoPlay are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- Android saved-video playback no longer stops its newly created VideoView during first composition. Player cleanup follows AndroidView release and media identity; device regressions cover cold entry, repeated entry, speed changes and file replacement.
+- iOS app bundles now include resolved pre-release version/build metadata, avoiding the ML Kit model-downloader fallback identified in the iOS 27 crash. Host-app tests and the built-bundle verifier reject missing or unresolved versions.
+- Stage 18.5 tracks every iOS processing run with a cancellable task plus immutable run/media identity, so Back/import/recovery replacement cannot let an old job save, clear a newer checkpoint, or navigate a different media item to Player.
+- Neural Voice routing on Android and iOS now requires a Vietnamese target; stale/recovered neural voice identifiers for other target languages fall back to the matching offline system voice instead of failing inside the Vietnamese-only neural engine.
+- Android Offline translation now rejects auto-detected languages outside the product-supported EN/VI/JA/ZH set instead of instructing users to download a model that Settings cannot install.
+- Temporary system/neural TTS session audio is removed after mix and on failed synthesis, with cold-start stale-session cleanup on both platforms.
+- Cloud translation normalizes regional BCP-47 language tags before Workers AI, bypasses provider inference for same-language jobs, gives iOS requests an explicit finite timeout, and reports cue-only iOS transcripts as local no-speech rather than a backend failure.
+
 ### Added
 - Initial native SwiftUI and Jetpack Compose product foundations for the LingoPlay consumer flow.
 - Real local video picking, metadata inspection, and local audio demux boundaries on iOS and Android.

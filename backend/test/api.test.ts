@@ -91,6 +91,58 @@ test("Workers AI translation preserves ids and sends text only", async () => {
   ]);
 });
 
+test("Workers AI normalizes BCP-47 target language tags", async () => {
+  let received: WorkersAITranslationInput | undefined;
+  const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceLanguage: "en-US",
+      targetLanguage: "vi-VN",
+      segments: [{ id: "s1", startMs: 0, endMs: 2200, text: "Hello world" }],
+    }),
+  }), {
+    AI: {
+      run: async (_model, input) => {
+        received = input;
+        return { translated_text: "Xin chào thế giới" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, {
+    text: "Hello world",
+    source_lang: "en",
+    target_lang: "vi",
+  });
+});
+
+test("same-language translation short-circuits without provider inference", async () => {
+  let called = false;
+  const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceLanguage: "vi-VN",
+      targetLanguage: "vi",
+      segments: [{ id: "s1", startMs: 0, endMs: 2200, text: "[Music] Xin chào thế giới" }],
+    }),
+  }), {
+    AI: {
+      run: async () => {
+        called = true;
+        return { translated_text: "không được gọi" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as { translations: Array<{ id: string; text: string }> };
+  assert.deepEqual(body.translations, [{ id: "s1", text: "Xin chào thế giới" }]);
+  assert.equal(called, false);
+});
+
 test("Workers AI strips control tokens and corrects strong English misdetection", async () => {
   let received: WorkersAITranslationInput | undefined;
   const response = await handleRequest(new Request("https://lingoplay.test/v1/translate", {

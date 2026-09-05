@@ -320,5 +320,7 @@ internal class AndroidProcessingCoordinator(
             ProcessingFailureStep.MIX,
             error.message ?: "Local audio mixing or video remux failed.",
         )
+    } finally {
+        TTSCachePolicy.cleanup(dub)
     }
 }

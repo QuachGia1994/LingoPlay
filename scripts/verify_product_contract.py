@@ -150,12 +150,16 @@ for name, source in (
     require(neural["version"] in source, f"{name} neural version follows archive digest")
     require(neural["sourceRevision"] in source, f"{name} neural source revision matches contract")
 require(
-    "preferredVoiceId == NeuralVoicePackManifest.voiceId && neuralVoiceInstalled" in ANDROID_NEURAL_RUNTIME,
-    "Android neural route requires explicit installed selection",
+    "preferredVoiceId == NeuralVoicePackManifest.voiceId" in ANDROID_NEURAL_RUNTIME
+    and "neuralVoiceInstalled" in ANDROID_NEURAL_RUNTIME
+    and "targetLanguage.substringBefore('-')" in ANDROID_NEURAL_RUNTIME,
+    "Android neural route requires explicit installed Vietnamese selection",
 )
 require(
-    "preferredVoiceIdentifier == NeuralVoicePackManifest.voiceIdentifier && neuralVoiceInstalled" in IOS_NEURAL_RUNTIME,
-    "iOS neural route requires explicit installed selection",
+    "preferredVoiceIdentifier == NeuralVoicePackManifest.voiceIdentifier" in IOS_NEURAL_RUNTIME
+    and "neuralVoiceInstalled" in IOS_NEURAL_RUNTIME
+    and 'baseLanguage == "vi"' in IOS_NEURAL_RUNTIME,
+    "iOS neural route requires explicit installed Vietnamese selection",
 )
 require(neural["modelLicense"] == "MIT", "contract records original Piper voice license")
 require(neural["datasetLicense"] == "CC-BY-4.0", "contract records VAIS-1000 corpus license")

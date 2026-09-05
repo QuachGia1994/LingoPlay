@@ -8,8 +8,15 @@ enum TTSRoute: Equatable {
 }
 
 enum TTSRoutingPolicy {
-    static func route(preferredVoiceIdentifier: String?, neuralVoiceInstalled: Bool) -> TTSRoute {
-        preferredVoiceIdentifier == NeuralVoicePackManifest.voiceIdentifier && neuralVoiceInstalled
+    static func route(
+        targetLanguage: String,
+        preferredVoiceIdentifier: String?,
+        neuralVoiceInstalled: Bool
+    ) -> TTSRoute {
+        let baseLanguage = targetLanguage.lowercased().split(separator: "-").first.map(String.init)
+        return baseLanguage == "vi" &&
+            preferredVoiceIdentifier == NeuralVoicePackManifest.voiceIdentifier &&
+            neuralVoiceInstalled
             ? .neural
             : .system
     }
@@ -52,11 +59,16 @@ actor NeuralVietnameseTTSService {
         }
 
         let root = try makeSessionDirectory()
+        var succeeded = false
+        defer {
+            if !succeeded { try? FileManager.default.removeItem(at: root) }
+        }
         var output: [DubSpeechSegment] = []
         for (index, segment) in document.segments.enumerated() {
             output.append(try synthesizeSegment(segment, tts: tts, root: root))
             await progress(index + 1, document.segments.count)
         }
+        succeeded = true
         return DubSpeechDocument(
             voiceIdentifier: NeuralVoicePackManifest.voiceIdentifier,
             segments: output
@@ -142,6 +154,7 @@ final class OfflineDubbingTTSService {
     ) async throws -> DubSpeechDocument {
         let neuralModel = neuralStore.model()
         switch TTSRoutingPolicy.route(
+            targetLanguage: document.targetLanguage,
             preferredVoiceIdentifier: preferredVoiceIdentifier,
             neuralVoiceInstalled: neuralModel != nil
         ) {
