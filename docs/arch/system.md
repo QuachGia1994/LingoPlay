@@ -1,6 +1,6 @@
 # System architecture
 
-> updated 2026-09-05 · 263d28d
+> updated 2026-09-05 · 463175d
 
 ## Goal
 Keep the heavy media path local while exposing a small server boundary for translation/provider access and entitlement state.
@@ -160,9 +160,9 @@ The Worker must never accept multipart/form-data, audio/*, video/*, or opaque me
 - Cloning Resume applies checkpoint opt-in AND current Settings consent. This revalidates permission while preserving the remaining immutable checkpoint settings and speaker map.
 - ZipVoice requires EN/ZH for detected reference speech and output. Unsupported reference sources and transcripts with no eligible reference use ordinary offline voices; no cloud fallback or reusable voicebank is introduced.
 - Any secondary speaker contributing at least 120 ms makes the whole ASR chunk unknown, even below 35% of the primary duration. This is conservative attribution, not word-level diarization or guaranteed acoustic purity. Labels remain ordered within each diarization result; they do not authenticate identity across independent reclustering.
-- Android reference extraction decodes bounded chunks once and retains only selected <=15-second windows. iOS reads selected AVAudioFile frame ranges off MainActor. Native diarization still accepts a full PCM array with the existing 30-minute Android / 15-minute iOS cap; those caps are not measured guarantees against device memory pressure.
+- Android reference extraction decodes bounded chunks once and retains only selected <=15-second windows. iOS reads selected AVAudioFile frame ranges off MainActor and directly copies already-matching mono Float32 PCM instead of routing it through AVAudioConverter. Native diarization still accepts a full PCM array with the existing 30-minute Android / 15-minute iOS cap; those caps are not measured guarantees against device memory pressure.
 - Parent TTS orchestration owns successful group output until transfer. A later clone/system/neural failure or cancellation removes every accumulated session. Android native session ownership lives outside the dispatcher hop so cancelled result delivery cannot orphan generated audio.
-- Mix/remux retains the complete dubbed audio track after the source video ends. Output and Library duration reflect the extended media; the original video track is preserved without generating extra frames. Linh's Vietnamese system rate remains 0.82 baseline and 1.18 maximum fit multiplier; existing overlap placement remains unchanged.
+- Mix/remux retains the complete dubbed audio track after the source video ends. iOS extends original-audio/video composition tracks with empty timeline ranges to the dubbed duration, so output and Library duration reflect the extended media without synthesizing extra video frames. Linh's Vietnamese system rate remains 0.82 baseline and 1.18 maximum fit multiplier; existing overlap placement remains unchanged.
 - Swift recovery writes check cancellation at the actor storage boundary. A cancelled processing task remains owned until native return; replacement runs await it and generation-scoped recovery refresh rejects stale UI writes. Native synchronous inference has cooperative checks before/after calls; Task cancellation is not a native hard-abort watchdog.
 
 ## Current stage

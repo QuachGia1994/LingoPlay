@@ -442,8 +442,19 @@ actor SpeakerDiarizationService {
             sampleRate: sampleRate,
             channels: 1,
             interleaved: false
-        ), let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
-        else {
+        ) else {
+            throw NSError(
+                domain: "LingoPlay.SpeakerAI",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to decode audio for local speaker analysis."]
+            )
+        }
+        let canReadDirectly = inputFormat.commonFormat == .pcmFormatFloat32
+            && inputFormat.channelCount == 1
+            && !inputFormat.isInterleaved
+            && abs(inputFormat.sampleRate - sampleRate) < 0.5
+        let converter = canReadDirectly ? nil : AVAudioConverter(from: inputFormat, to: outputFormat)
+        guard canReadDirectly || converter != nil else {
             throw NSError(
                 domain: "LingoPlay.SpeakerAI",
                 code: 4,
@@ -468,6 +479,21 @@ actor SpeakerDiarizationService {
             inputBuffer.frameLength = 0
             try file.read(into: inputBuffer, frameCount: AVAudioFrameCount(min(Int64(inputCapacity), endFrame - file.framePosition)))
             if inputBuffer.frameLength == 0 { break }
+            if canReadDirectly {
+                guard let channel = inputBuffer.floatChannelData?[0] else { throw TTSError.invalidAudio }
+                let count = Int(inputBuffer.frameLength)
+                guard Int64(result.count + count) <= maximumSamples else {
+                    throw NSError(
+                        domain: "LingoPlay.SpeakerAI",
+                        code: 5,
+                        userInfo: [NSLocalizedDescriptionKey: "Multi-speaker analysis supports up to \(maximumSeconds / 60) minutes per video on this device."]
+                    )
+                }
+                result.append(contentsOf: UnsafeBufferPointer(start: channel, count: count))
+                continue
+            }
+
+            guard let converter else { throw TTSError.invalidAudio }
             let ratio = sampleRate / inputFormat.sampleRate
             let outputCapacity = AVAudioFrameCount(max(1, Int(ceil(Double(inputBuffer.frameLength) * ratio)) + 32))
             guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {

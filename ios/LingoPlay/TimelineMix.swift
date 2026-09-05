@@ -195,6 +195,20 @@ final class TimelineMixService {
             of: dubTrack,
             at: .zero
         )
+        let playbackDuration = CMTimeMaximum(sourceDuration, dubDuration)
+        let sourceAudioEnd = CMTimeAdd(sourceAudioRange.start, sourceAudioDuration)
+        if CMTimeCompare(playbackDuration, sourceAudioEnd) > 0 {
+            outputOriginalTrack.insertEmptyTimeRange(CMTimeRange(
+                start: sourceAudioEnd,
+                duration: CMTimeSubtract(playbackDuration, sourceAudioEnd)
+            ))
+        }
+        if CMTimeCompare(playbackDuration, sourceDuration) > 0 {
+            outputVideoTrack.insertEmptyTimeRange(CMTimeRange(
+                start: sourceDuration,
+                duration: CMTimeSubtract(playbackDuration, sourceDuration)
+            ))
+        }
 
         let context = PlaybackMixContext(
             originalTrack: outputOriginalTrack,
@@ -329,6 +343,14 @@ final class TimelineMixService {
             of: dubTrack,
             at: .zero
         )
+        let mixedDuration = CMTimeMaximum(sourceDuration, dubDuration)
+        let sourceAudioEnd = CMTimeAdd(sourceAudioRange.start, sourceAudioDuration)
+        if CMTimeCompare(mixedDuration, sourceAudioEnd) > 0 {
+            outputOriginalTrack.insertEmptyTimeRange(CMTimeRange(
+                start: sourceAudioEnd,
+                duration: CMTimeSubtract(mixedDuration, sourceAudioEnd)
+            ))
+        }
 
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
             throw TimelineMixError.exportUnavailable
@@ -474,6 +496,12 @@ final class TimelineMixService {
             of: mixedTrack,
             at: .zero
         )
+        if CMTimeCompare(mixedDuration, sourceDuration) > 0 {
+            outputVideoTrack.insertEmptyTimeRange(CMTimeRange(
+                start: sourceDuration,
+                duration: CMTimeSubtract(mixedDuration, sourceDuration)
+            ))
+        }
 
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
             throw TimelineMixError.exportUnavailable
