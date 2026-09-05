@@ -160,6 +160,11 @@ require(clean_background["stems"] == ["vocals", "accompaniment"], "two-stem cont
 for name, source in (("Android", ANDROID_SEPARATION_MODEL), ("iOS", IOS_SEPARATION_MODEL)):
     require(f'{clean_background["archiveBytes"]:_}' in source, f"{name} separator archive size pinned")
     require(clean_background["archiveSha256"] in source, f"{name} separator archive hash pinned")
+    require(clean_background["previousArchiveSha256"] in source, f"{name} separator previous envelope hash recognized")
+    for stem_name, model_file in clean_background["modelFiles"].items():
+        require(model_file["name"] in source, f"{name} {stem_name} model filename pinned")
+        require(f'{model_file["bytes"]:_}' in source, f"{name} {stem_name} model size pinned")
+        require(model_file["sha256"] in source, f"{name} {stem_name} model hash pinned")
     require(clean_background["version"] in source, f"{name} separator version pinned")
 require('getBoolean("clean_background_enabled", false)' in ANDROID_PREFS, "Android Clean Background defaults off")
 require('UserDefaults.standard.bool(forKey: "lingoplay.cleanBackgroundEnabled")' in IOS_APP_MODEL, "iOS Clean Background defaults off")

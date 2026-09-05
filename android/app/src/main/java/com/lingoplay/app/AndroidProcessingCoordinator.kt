@@ -314,9 +314,14 @@ internal class AndroidProcessingCoordinator(
 
     private suspend fun separateAudio(audioFile: File): SeparatedAudioStems = try {
         runtime.record("source_separation_started")
-        runtime.separateAudio(audioFile).also {
+        val stems = runtime.separateAudio(audioFile)
+        try {
             currentCoroutineContext().ensureActive()
             runtime.record("source_separation_completed")
+            stems
+        } catch (cancelled: CancellationException) {
+            stems.cleanup()
+            throw cancelled
         }
     } catch (cancelled: CancellationException) {
         throw cancelled

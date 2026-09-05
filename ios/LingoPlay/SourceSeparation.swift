@@ -72,7 +72,8 @@ enum CleanBackgroundCapability {
 actor SpleeterSourceSeparationEngine: SourceSeparationEngine {
     nonisolated let availability: SourceSeparationAvailability = .engineReady
     private let model: InstalledSourceSeparationModel
-    private let secondsPerChunk: Int = 12
+    private let coreSeconds: Int = 10
+    private let contextMilliseconds: Int = 500
 
     init(model: InstalledSourceSeparationModel) {
         self.model = model
@@ -91,7 +92,11 @@ actor SpleeterSourceSeparationEngine: SourceSeparationEngine {
         guard let separator = LingoSourceSeparator(model: model) else {
             throw SourceSeparationError.inferenceFailed
         }
-        let decoder = try StereoFloatChunkReader(url: sourceAudioURL, secondsPerChunk: secondsPerChunk)
+        let decoder = try StereoFloatChunkReader(
+            url: sourceAudioURL,
+            coreSeconds: coreSeconds,
+            contextMilliseconds: contextMilliseconds
+        )
         var voiceWriter: Pcm16WaveWriter?
         var backgroundWriter: Pcm16WaveWriter?
         var chunkCount = 0
@@ -103,18 +108,12 @@ actor SpleeterSourceSeparationEngine: SourceSeparationEngine {
         while let chunk = try decoder.nextChunk() {
             try Task.checkCancellation()
             let input = LingoAudioData(samples: chunk.planarStereo, channelCount: 2, sampleRate: chunk.sampleRate)
-            guard let stems = separator.process(buffer: input), stems.count >= 2 else {
+            guard let stems = separator.process(buffer: input), stems.count == 2 else {
                 throw SourceSeparationError.inferenceFailed
             }
             try Task.checkCancellation()
             let voice = stems[0]
             let background = stems[1]
-            let expectedVoiceFrames = max(1, Int((
-                Double(chunk.frames) * Double(voice.sampleRate) / Double(chunk.sampleRate)
-            ).rounded()))
-            let expectedBackgroundFrames = max(1, Int((
-                Double(chunk.frames) * Double(background.sampleRate) / Double(chunk.sampleRate)
-            ).rounded()))
             if voiceWriter == nil {
                 voiceWriter = try Pcm16WaveWriter(url: vocalsURL, sampleRate: voice.sampleRate, channels: voice.channelCount)
             }
@@ -123,8 +122,10 @@ actor SpleeterSourceSeparationEngine: SourceSeparationEngine {
                     url: backgroundURL, sampleRate: background.sampleRate, channels: background.channelCount
                 )
             }
-            try voiceWriter?.append(voice, maximumFrames: expectedVoiceFrames)
-            try backgroundWriter?.append(background, maximumFrames: expectedBackgroundFrames)
+            let voiceCrop = cropRange(for: chunk, outputSampleRate: voice.sampleRate)
+            let backgroundCrop = cropRange(for: chunk, outputSampleRate: background.sampleRate)
+            try voiceWriter?.append(voice, startFrame: voiceCrop.start, frameCount: voiceCrop.count)
+            try backgroundWriter?.append(background, startFrame: backgroundCrop.start, frameCount: backgroundCrop.count)
             chunkCount += 1
         }
         guard chunkCount > 0 else { throw SourceSeparationError.invalidAudio }
@@ -152,6 +153,22 @@ actor SpleeterSourceSeparationEngine: SourceSeparationEngine {
         guard values.isRegularFile == true, (values.fileSize ?? 0) > 44 else {
             throw SourceSeparationError.inferenceFailed
         }
+    }
+
+    private func cropRange(for chunk: StereoFloatChunk, outputSampleRate: Int) -> (start: Int, count: Int) {
+        let processStart = mapFrame(chunk.processStartFrame, from: chunk.sampleRate, to: outputSampleRate)
+        let coreStart = mapFrame(chunk.coreStartFrame, from: chunk.sampleRate, to: outputSampleRate)
+        let coreEnd = mapFrame(
+            chunk.coreStartFrame + Int64(chunk.coreFrames),
+            from: chunk.sampleRate,
+            to: outputSampleRate
+        )
+        return (max(0, Int(coreStart - processStart)), max(1, Int(coreEnd - coreStart)))
+    }
+
+    private func mapFrame(_ frame: Int64, from sourceRate: Int, to targetRate: Int) -> Int64 {
+        let numerator = frame * Int64(targetRate)
+        return (numerator + Int64(sourceRate) / 2) / Int64(sourceRate)
     }
 }
 
@@ -229,76 +246,92 @@ private struct StereoFloatChunk: Sendable {
     let planarStereo: [Float]
     let frames: Int
     let sampleRate: Int
+    let processStartFrame: Int64
+    let coreStartFrame: Int64
+    let coreFrames: Int
 }
 
 private final class StereoFloatChunkReader {
     private let file: AVAudioFile
-    private let inputFormat: AVAudioFormat
-    private let outputFormat: AVAudioFormat
-    private let converter: AVAudioConverter?
-    private let framesPerChunk: AVAudioFrameCount
+    private let format: AVAudioFormat
+    private let coreFrames: Int64
+    private let contextFrames: Int64
+    private var nextCoreStart: Int64 = 0
 
-    init(url: URL, secondsPerChunk: Int) throws {
-        file = try AVAudioFile(forReading: url)
-        inputFormat = file.processingFormat
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0,
-              let stereo = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: inputFormat.sampleRate,
-                channels: 2,
-                interleaved: false
-              )
+    init(url: URL, coreSeconds: Int, contextMilliseconds: Int) throws {
+        file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        format = file.processingFormat
+        guard format.sampleRate > 0, format.channelCount > 0,
+              format.commonFormat == .pcmFormatFloat32, !format.isInterleaved
         else { throw SourceSeparationError.invalidAudio }
-        outputFormat = stereo
-        let alreadyStereoFloat = inputFormat.commonFormat == .pcmFormatFloat32 &&
-            inputFormat.channelCount == 2 && !inputFormat.isInterleaved
-        converter = alreadyStereoFloat ? nil : AVAudioConverter(from: inputFormat, to: outputFormat)
-        if !alreadyStereoFloat && converter == nil { throw SourceSeparationError.invalidAudio }
-        framesPerChunk = AVAudioFrameCount(max(1, Int(inputFormat.sampleRate) * secondsPerChunk))
+        coreFrames = Int64(max(1, Int(format.sampleRate.rounded()) * coreSeconds))
+        contextFrames = max(1, Int64((format.sampleRate * Double(contextMilliseconds) / 1_000).rounded()))
     }
 
     func nextChunk() throws -> StereoFloatChunk? {
-        guard file.framePosition < file.length else { return nil }
-        let remaining = file.length - file.framePosition
-        let requested = AVAudioFrameCount(min(Int64(framesPerChunk), remaining))
-        guard let input = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: requested) else {
+        guard nextCoreStart < file.length else { return nil }
+        let coreEnd = min(file.length, nextCoreStart + coreFrames)
+        let processStart = max(0, nextCoreStart - contextFrames)
+        let processEnd = min(file.length, coreEnd + contextFrames)
+        let requested64 = processEnd - processStart
+        guard requested64 > 0, requested64 <= Int64(UInt32.max) else {
+            throw SourceSeparationError.invalidAudio
+        }
+        let requested = AVAudioFrameCount(requested64)
+        file.framePosition = processStart
+        guard let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: requested) else {
             throw SourceSeparationError.invalidAudio
         }
         try file.read(into: input, frameCount: requested)
-        guard input.frameLength > 0 else { return nil }
-
-        let stereo: AVAudioPCMBuffer
-        if converter == nil {
-            stereo = input
-        } else {
-            guard let converter,
-                  let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: input.frameLength + 32)
-            else { throw SourceSeparationError.invalidAudio }
-            var supplied = false
-            var conversionError: NSError?
-            let status = converter.convert(to: output, error: &conversionError) { _, status in
-                if supplied {
-                    status.pointee = .noDataNow
-                    return nil
-                }
-                supplied = true
-                status.pointee = .haveData
-                return input
-            }
-            guard status != .error else { throw conversionError ?? SourceSeparationError.invalidAudio }
-            stereo = output
-        }
-        guard let channels = stereo.floatChannelData, stereo.format.channelCount >= 2 else {
+        guard input.frameLength > 0, let channels = input.floatChannelData else {
             throw SourceSeparationError.invalidAudio
         }
-        let count = Int(stereo.frameLength)
-        guard count > 0 else { return nil }
+        let count = Int(input.frameLength)
+        let channelCount = Int(format.channelCount)
         var planar = [Float](repeating: 0, count: count * 2)
-        planar.withUnsafeMutableBufferPointer { buffer in
-            buffer.baseAddress!.initialize(from: channels[0], count: count)
-            buffer.baseAddress!.advanced(by: count).initialize(from: channels[1], count: count)
+        if channelCount == 1 {
+            planar.withUnsafeMutableBufferPointer { buffer in
+                buffer.baseAddress!.initialize(from: channels[0], count: count)
+                buffer.baseAddress!.advanced(by: count).initialize(from: channels[0], count: count)
+            }
+        } else if channelCount == 2 {
+            planar.withUnsafeMutableBufferPointer { buffer in
+                buffer.baseAddress!.initialize(from: channels[0], count: count)
+                buffer.baseAddress!.advanced(by: count).initialize(from: channels[1], count: count)
+            }
+        } else {
+            for frame in 0..<count {
+                var left: Float = 0
+                var right: Float = 0
+                var leftCount: Float = 0
+                var rightCount: Float = 0
+                for channel in 0..<channelCount {
+                    if channel.isMultiple(of: 2) {
+                        left += channels[channel][frame]
+                        leftCount += 1
+                    } else {
+                        right += channels[channel][frame]
+                        rightCount += 1
+                    }
+                }
+                planar[frame] = left / max(1, leftCount)
+                planar[count + frame] = right / max(1, rightCount)
+            }
         }
-        return StereoFloatChunk(planarStereo: planar, frames: count, sampleRate: Int(stereo.format.sampleRate.rounded()))
+        let actualProcessEnd = processStart + Int64(count)
+        let actualCoreEnd = min(coreEnd, actualProcessEnd)
+        let actualCoreFrames = Int(max(0, actualCoreEnd - nextCoreStart))
+        guard actualCoreFrames > 0 else { throw SourceSeparationError.invalidAudio }
+        let chunk = StereoFloatChunk(
+            planarStereo: planar,
+            frames: count,
+            sampleRate: Int(format.sampleRate.rounded()),
+            processStartFrame: processStart,
+            coreStartFrame: nextCoreStart,
+            coreFrames: actualCoreFrames
+        )
+        nextCoreStart += Int64(actualCoreFrames)
+        return chunk
     }
 }
 
@@ -318,26 +351,32 @@ private final class Pcm16WaveWriter {
         try handle.write(contentsOf: Data(repeating: 0, count: 44))
     }
 
-    func append(_ audio: LingoAudioData, maximumFrames: Int) throws {
-        guard audio.sampleRate == sampleRate, audio.channelCount == channels else {
+    func append(_ audio: LingoAudioData, startFrame: Int, frameCount: Int) throws {
+        guard audio.sampleRate == sampleRate, audio.channelCount == channels,
+              startFrame >= 0, frameCount > 0, startFrame < audio.samplesPerChannel
+        else { throw SourceSeparationError.inferenceFailed }
+        let availableFrames = audio.samplesPerChannel - startFrame
+        let frames = min(availableFrames, frameCount)
+        let missingFrames = frameCount - frames
+        let maximumTailPadding = max(4_096, sampleRate / 10)
+        guard missingFrames <= maximumTailPadding else { throw SourceSeparationError.inferenceFailed }
+        let totalByteCount = frameCount * channels * MemoryLayout<Int16>.size
+        guard UInt64(dataBytes) + UInt64(totalByteCount) <= UInt64(UInt32.max - 36) else {
             throw SourceSeparationError.inferenceFailed
         }
-        let frames = min(audio.samplesPerChannel, maximumFrames)
-        guard frames > 0 else { return }
-        let byteCount = frames * channels * MemoryLayout<Int16>.size
-        guard UInt64(dataBytes) + UInt64(byteCount) <= UInt64(UInt32.max - 36) else {
-            throw SourceSeparationError.inferenceFailed
-        }
-        var interleaved = [Int16](repeating: 0, count: frames * channels)
-        for frame in 0..<frames {
-            for channel in 0..<channels {
-                let value = audio.samples[channel * audio.samplesPerChannel + frame].clamped(to: -1...1)
-                interleaved[frame * channels + channel] = Int16((value * Float(Int16.max)).rounded())
+        var interleaved = [Int16](repeating: 0, count: frameCount * channels)
+        if frames > 0 {
+            for frame in 0..<frames {
+                for channel in 0..<channels {
+                    let sourceIndex = channel * audio.samplesPerChannel + startFrame + frame
+                    let value = audio.samples[sourceIndex].clamped(to: -1...1)
+                    interleaved[frame * channels + channel] = Int16((value * Float(Int16.max)).rounded())
+                }
             }
         }
         let pcmData = interleaved.withUnsafeBytes { Data($0) }
         try handle.write(contentsOf: pcmData)
-        dataBytes += UInt32(byteCount)
+        dataBytes += UInt32(totalByteCount)
     }
 
     func close() throws {

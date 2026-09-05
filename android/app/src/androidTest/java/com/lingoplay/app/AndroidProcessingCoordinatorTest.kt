@@ -153,12 +153,38 @@ class AndroidProcessingCoordinatorTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test
+    fun cancelledSeparatedResultIsCleanedBeforeCoordinatorAcceptsOwnership() = runBlocking {
+        val root = createTempDirectory("lingoplay-separation-cancelled-").toFile()
+        try {
+            val runtime = FakeRuntime(root, cancelAfterSeparation = true)
+            val job = async {
+                AndroidProcessingCoordinator(runtime, true).run(
+                    LocalMediaItem(Uri.EMPTY, "sample.mp4", 2_000, 10, true), null,
+                    ProcessingConfig(
+                        sourceLanguage = SourceLanguageChoice.AUTO,
+                        targetLanguage = TargetLanguageChoice.ENGLISH,
+                        preferredVoiceId = null,
+                        dubbingMode = DubbingModePreset.BALANCED,
+                        subtitleMode = SubtitleMode.BILINGUAL,
+                        cleanBackgroundEnabled = true,
+                    ),
+                ) { }
+            }
+            try { job.await() } catch (_: kotlinx.coroutines.CancellationException) { }
+            assertTrue("Cancelled separated stems must be deleted before ownership is lost.", runtime.separationRoot?.exists() == false)
+            assertTrue("The separation runtime must have returned a concrete session.", "separate" in runtime.calls)
+        } finally { root.deleteRecursively() }
+    }
+
     private class FakeRuntime(
         private val root: File,
         private val modelFailure: Throwable? = null,
         private val cancelAfterExtract: Boolean = false,
+        private val cancelAfterSeparation: Boolean = false,
     ) : AndroidProcessingRuntime {
         val calls = mutableListOf<String>()
+        var separationRoot: File? = null
         private val audio = File(root, "audio.wav").apply { writeBytes(byteArrayOf(1)) }
         private val encoder = File(root, "encoder.onnx").apply { writeBytes(byteArrayOf(1)) }
         private val decoder = File(root, "decoder.onnx").apply { writeBytes(byteArrayOf(1)) }
@@ -198,6 +224,18 @@ class AndroidProcessingCoordinatorTest {
         override suspend fun availableVoices(): List<OfflineVoiceOption> = emptyList()
 
         override fun voiceCloningModelInstalled(): Boolean = false
+
+        override fun sourceSeparationAvailable(): Boolean = cancelAfterSeparation
+
+        override suspend fun separateAudio(audioFile: File): SeparatedAudioStems {
+            calls += "separate"
+            val session = File(root, "separated-session").apply { mkdirs() }
+            separationRoot = session
+            val voice = File(session, "vocals.wav").apply { writeBytes(byteArrayOf(1)) }
+            val background = File(session, "accompaniment.wav").apply { writeBytes(byteArrayOf(2)) }
+            if (cancelAfterSeparation) kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.cancel()
+            return SeparatedAudioStems(voice, background, session)
+        }
 
         override suspend fun buildVoiceCloneReferences(
             audioFile: File,

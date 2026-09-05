@@ -6,12 +6,22 @@ enum SourceSeparationManifest {
     static let archiveRoot = "sherpa-onnx-spleeter-2stems-fp16"
     static let archiveName = archiveRoot + ".tar.bz2"
     static let archiveBytes: Int64 = 35_271_738
-    static let archiveSHA256 = "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6"
+    static let archiveSHA256 = "d54561979bd2e08a51e7dbd99ac36bb47564e089eefd403636dbca93e811bba2"
+    static let previousArchiveSHA256 = "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6"
     static let vocalsName = "vocals.fp16.onnx"
+    static let vocalsBytes: Int64 = 19_681_017
+    static let vocalsSHA256 = "24cef84aedcd1fe87c0b743ef3370ad34dc1fabf6c9014d6128a75a538c7b668"
     static let accompanimentName = "accompaniment.fp16.onnx"
+    static let accompanimentBytes: Int64 = 19_681_024
+    static let accompanimentSHA256 = "d14cea55793cc531a5875f5f4da08207d1c5ab9292e8e0099a104eecb014fcc0"
     static let archiveURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/\(archiveName)"
     static let archiveSpec = PinnedDownloadSpec(
         name: archiveName, url: archiveURL, bytes: archiveBytes, sha256: archiveSHA256
+    )
+    static let acceptedArchiveSHA256 = Set([archiveSHA256, previousArchiveSHA256])
+    static let vocalsSpec = PinnedDownloadSpec(name: vocalsName, url: "", bytes: vocalsBytes, sha256: vocalsSHA256)
+    static let accompanimentSpec = PinnedDownloadSpec(
+        name: accompanimentName, url: "", bytes: accompanimentBytes, sha256: accompanimentSHA256
     )
 }
 
@@ -55,12 +65,22 @@ struct SourceSeparationModelStore {
 
     func validatedModel(at directory: URL) -> InstalledSourceSeparationModel? {
         let marker = directory.appendingPathComponent("pack.sha256")
-        guard (try? String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)) == SourceSeparationManifest.archiveSHA256
-        else { return nil }
+        guard let markerText = try? String(contentsOf: marker, encoding: .utf8) else { return nil }
+        let markerDigest = markerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard SourceSeparationManifest.acceptedArchiveSHA256.contains(markerDigest) else { return nil }
         let vocals = directory.appendingPathComponent(SourceSeparationManifest.vocalsName)
         let accompaniment = directory.appendingPathComponent(SourceSeparationManifest.accompanimentName)
-        guard isNonEmptyFile(vocals), isNonEmptyFile(accompaniment) else { return nil }
+        guard PinnedFileIntegrity.fileSize(vocals) == SourceSeparationManifest.vocalsBytes,
+              PinnedFileIntegrity.fileSize(accompaniment) == SourceSeparationManifest.accompanimentBytes
+        else { return nil }
         return InstalledSourceSeparationModel(vocalsURL: vocals, accompanimentURL: accompaniment)
+    }
+
+    func contentHashesMatch(at directory: URL) -> Bool {
+        let vocals = directory.appendingPathComponent(SourceSeparationManifest.vocalsName)
+        let accompaniment = directory.appendingPathComponent(SourceSeparationManifest.accompanimentName)
+        return PinnedFileIntegrity.matches(vocals, spec: SourceSeparationManifest.vocalsSpec) &&
+            PinnedFileIntegrity.matches(accompaniment, spec: SourceSeparationManifest.accompanimentSpec)
     }
 
     func rootURL(create: Bool) throws -> URL {
@@ -70,11 +90,6 @@ struct SourceSeparationModelStore {
         let root = support.appendingPathComponent("LingoPlay/Models/SourceSeparation", isDirectory: true)
         if create { try fileManager.createDirectory(at: root, withIntermediateDirectories: true) }
         return root
-    }
-
-    private func isNonEmptyFile(_ url: URL) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else { return false }
-        return values.isRegularFile == true && (values.fileSize ?? 0) > 0
     }
 }
 
@@ -123,7 +138,9 @@ actor SourceSeparationModelInstaller {
         try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
         do {
             try extractVerifiedArchive(archive, to: staging)
-            try SourceSeparationManifest.archiveSHA256.write(
+            guard store.contentHashesMatch(at: staging) else { throw PinnedDownloadError.integrityFailed }
+            let archiveDigest = try PinnedFileIntegrity.sha256(archive)
+            try archiveDigest.write(
                 to: staging.appendingPathComponent("pack.sha256"), atomically: true, encoding: .utf8
             )
             guard store.validatedModel(at: staging) != nil else { throw PinnedDownloadError.integrityFailed }

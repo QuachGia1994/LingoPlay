@@ -5,6 +5,9 @@ All notable changes to LingoPlay are documented here.
 ## [Unreleased]
 
 ### Fixed
+- Stage 20.1 Clean Background runtime integrity: Spleeter now processes bounded core windows with guard context and absolute-frame core cropping instead of hard-stitching independent 12-second outputs; Android also cleans a completed native separation result if coroutine cancellation lands before coordinator ownership transfers.
+- Clean Background preserves the original source-audio timeline origin when inserting separated accompaniment. Android reads the generated PCM16 accompaniment WAV directly instead of depending on an OEM `audio/raw` MediaCodec decoder.
+- The currently served official Spleeter archive envelope changed while retaining the same official two ONNX payloads. Both clients pin the current archive digest and exact inner model sizes/SHA-256 values; Android also accepts the prior known archive digest only when the extracted models match those exact inner pins.
 - Stage 19 audit repairs: Resume cloning now requires saved opt-in and current consent; both reference and output languages must be EN/ZH. Unsupported sources or absent clear references use installed offline voices.
 - Speaker attribution no longer hides a secondary speaker contributing at least 120 ms behind a 35% dominance threshold. Mixed chunks remain unknown and cannot supply clone references; words are not split without word timestamps.
 - Reference extraction retains only selected short PCM windows. Hybrid/multi-voice failures clean earlier successful groups; Android also cleans sessions when dispatcher cancellation discards a completed native result.

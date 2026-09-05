@@ -77,6 +77,9 @@ internal object SourceSeparationNative {
                 chunk.planarStereo,
                 chunk.frames,
                 chunk.sampleRate,
+                chunk.processStartFrame,
+                chunk.coreStartFrame,
+                chunk.coreFrames,
                 vocalsOutput.absolutePath,
                 accompanimentOutput.absolutePath,
             ),
@@ -90,6 +93,9 @@ internal object SourceSeparationNative {
         planarStereo: FloatArray,
         frames: Int,
         sampleRate: Int,
+        processStartFrame: Long,
+        coreStartFrame: Long,
+        coreFrames: Int,
         vocalsOutput: String,
         accompanimentOutput: String,
     ): Boolean
@@ -112,14 +118,19 @@ internal class SpleeterSourceSeparationEngine(
             Pcm16WaveAppender(vocals).use { vocalsWriter ->
                 Pcm16WaveAppender(background).use { backgroundWriter ->
                     var chunkIndex = 0
-                    StereoAudioChunkDecoder.forEachChunk(sourceAudio, secondsPerChunk = 12) { chunk ->
+                    StereoAudioChunkDecoder.forEachChunk(
+                        file = sourceAudio,
+                        coreSeconds = 10,
+                        contextMilliseconds = 500,
+                    ) { chunk ->
                         currentCoroutineContext().ensureActive()
                         val voiceChunk = File(root, "voice-$chunkIndex.wav")
                         val backgroundChunk = File(root, "background-$chunkIndex.wav")
                         try {
                             SourceSeparationNative.separateChunk(model, chunk, voiceChunk, backgroundChunk)
-                            vocalsWriter.append(voiceChunk)
-                            backgroundWriter.append(backgroundChunk)
+                            currentCoroutineContext().ensureActive()
+                            vocalsWriter.append(voiceChunk, chunk)
+                            backgroundWriter.append(backgroundChunk, chunk)
                         } finally {
                             voiceChunk.delete()
                             backgroundChunk.delete()
@@ -144,15 +155,20 @@ internal data class StereoAudioChunk(
     val planarStereo: FloatArray,
     val frames: Int,
     val sampleRate: Int,
+    val processStartFrame: Long,
+    val coreStartFrame: Long,
+    val coreFrames: Int,
 )
 
 private object StereoAudioChunkDecoder {
     suspend fun forEachChunk(
         file: File,
-        secondsPerChunk: Int,
+        coreSeconds: Int,
+        contextMilliseconds: Int,
         consume: suspend (StereoAudioChunk) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        require(secondsPerChunk in 4..30)
+        require(coreSeconds in 4..30)
+        require(contextMilliseconds in 100..2_000)
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
@@ -174,7 +190,7 @@ private object StereoAudioChunkDecoder {
             var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
-            var chunker = StereoChunkAccumulator(sampleRate, secondsPerChunk)
+            var chunker = StereoContextChunkAccumulator(sampleRate, coreSeconds, contextMilliseconds)
 
             while (!outputEnded) {
                 currentCoroutineContext().ensureActive()
@@ -200,9 +216,9 @@ private object StereoAudioChunkDecoder {
                         val format = decoder.outputFormat
                         val newRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         if (newRate != sampleRate) {
-                            chunker.flush()?.let { consume(it) }
+                            chunker.flush().forEach { consume(it) }
                             sampleRate = newRate
-                            chunker = StereoChunkAccumulator(sampleRate, secondsPerChunk)
+                            chunker = StereoContextChunkAccumulator(sampleRate, coreSeconds, contextMilliseconds)
                         }
                         channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
                         pcmEncoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
@@ -223,7 +239,7 @@ private object StereoAudioChunkDecoder {
                     }
                 }
             }
-            chunker.flush()?.let { consume(it) }
+            chunker.flush().forEach { consume(it) }
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
@@ -235,7 +251,7 @@ private object StereoAudioChunkDecoder {
         buffer: ByteBuffer,
         encoding: Int,
         channels: Int,
-        chunker: StereoChunkAccumulator,
+        chunker: StereoContextChunkAccumulator,
         consume: suspend (StereoAudioChunk) -> Unit,
     ) {
         val bytesPerSample = when (encoding) {
@@ -261,31 +277,72 @@ private object StereoAudioChunkDecoder {
     }
 }
 
-private class StereoChunkAccumulator(
+internal class StereoContextChunkAccumulator(
     private val sampleRate: Int,
-    secondsPerChunk: Int,
+    coreSeconds: Int,
+    contextMilliseconds: Int,
 ) {
-    private val capacity = sampleRate * secondsPerChunk
-    private val left = FloatArray(capacity)
-    private val right = FloatArray(capacity)
-    private var size = 0
+    private val coreCapacity = sampleRate * coreSeconds
+    private val contextCapacity = ((sampleRate.toLong() * contextMilliseconds) / 1_000L).toInt().coerceAtLeast(1)
+    private val currentCapacity = coreCapacity + contextCapacity
+    private val currentLeft = FloatArray(currentCapacity)
+    private val currentRight = FloatArray(currentCapacity)
+    private var currentSize = 0
+    private var leftContextLeft = FloatArray(contextCapacity)
+    private var leftContextRight = FloatArray(contextCapacity)
+    private var leftContextSize = 0
+    private var coreStartFrame = 0L
 
     fun add(leftSample: Float, rightSample: Float): StereoAudioChunk? {
-        left[size] = leftSample
-        right[size] = rightSample
-        size++
-        return if (size == capacity) emit() else null
+        currentLeft[currentSize] = leftSample
+        currentRight[currentSize] = rightSample
+        currentSize++
+        return if (currentSize == currentCapacity) emitCurrent() else null
     }
 
-    fun flush(): StereoAudioChunk? = if (size > 0) emit() else null
+    fun flush(): List<StereoAudioChunk> {
+        if (currentSize == 0) return emptyList()
+        val chunks = mutableListOf<StereoAudioChunk>()
+        while (currentSize > 0) {
+            chunks += emitCurrent()
+        }
+        return chunks
+    }
 
-    private fun emit(): StereoAudioChunk {
-        val frames = size
-        val planar = FloatArray(frames * 2)
-        left.copyInto(planar, 0, 0, frames)
-        right.copyInto(planar, frames, 0, frames)
-        size = 0
-        return StereoAudioChunk(planar, frames, sampleRate)
+    private fun emitCurrent(): StereoAudioChunk {
+        val coreFrames = minOf(coreCapacity, currentSize)
+        val processFrames = leftContextSize + currentSize
+        val planar = FloatArray(processFrames * 2)
+        leftContextLeft.copyInto(planar, 0, 0, leftContextSize)
+        currentLeft.copyInto(planar, leftContextSize, 0, currentSize)
+        leftContextRight.copyInto(planar, processFrames, 0, leftContextSize)
+        currentRight.copyInto(planar, processFrames + leftContextSize, 0, currentSize)
+        val processStartFrame = coreStartFrame - leftContextSize.toLong()
+        val emitted = StereoAudioChunk(
+            planarStereo = planar,
+            frames = processFrames,
+            sampleRate = sampleRate,
+            processStartFrame = processStartFrame,
+            coreStartFrame = coreStartFrame,
+            coreFrames = coreFrames,
+        )
+
+        val nextLeftSize = minOf(contextCapacity, coreFrames)
+        if (nextLeftSize > 0) {
+            val leftStart = coreFrames - nextLeftSize
+            currentLeft.copyInto(leftContextLeft, 0, leftStart, coreFrames)
+            currentRight.copyInto(leftContextRight, 0, leftStart, coreFrames)
+        }
+        leftContextSize = nextLeftSize
+
+        val carry = (currentSize - coreFrames).coerceAtLeast(0)
+        if (carry > 0) {
+            currentLeft.copyInto(currentLeft, 0, coreFrames, currentSize)
+            currentRight.copyInto(currentRight, 0, coreFrames, currentSize)
+        }
+        currentSize = carry
+        coreStartFrame += coreFrames.toLong()
+        return emitted
     }
 }
 
@@ -301,7 +358,7 @@ private class Pcm16WaveAppender(private val destination: File) : AutoCloseable {
         output.write(ByteArray(44))
     }
 
-    fun append(chunk: File) {
+    fun append(chunk: File, sourceChunk: StereoAudioChunk) {
         val info = readWaveInfo(chunk)
         if (sampleRate == 0) {
             sampleRate = info.sampleRate
@@ -310,6 +367,18 @@ private class Pcm16WaveAppender(private val destination: File) : AutoCloseable {
             check(sampleRate == info.sampleRate && channels == info.channels) { "Separated chunk format changed unexpectedly." }
         }
         check(info.bitsPerSample == 16 && info.audioFormat == 1) { "Separated stem must be PCM16 WAV." }
+        val bytesPerFrame = info.channels * 2L
+        check(info.dataBytes % bytesPerFrame == 0L) { "Separated WAV has a partial PCM frame." }
+        val actualFrames = info.dataBytes / bytesPerFrame
+        val coreEndFrame = sourceChunk.coreStartFrame + sourceChunk.coreFrames.toLong()
+        val expectedStart = mapFrame(sourceChunk.coreStartFrame, sourceChunk.sampleRate, info.sampleRate)
+        val expectedEnd = mapFrame(coreEndFrame, sourceChunk.sampleRate, info.sampleRate)
+        val expectedFrames = (expectedEnd - expectedStart).coerceAtLeast(1L)
+        check(actualFrames <= expectedFrames) { "Separated core exceeds its expected timeline span." }
+        val missingFrames = expectedFrames - actualFrames
+        val maximumTailPadding = maxOf(4_096L, info.sampleRate.toLong() / 10L)
+        check(missingFrames <= maximumTailPadding) { "Separated core lost too many output frames." }
+
         RandomAccessFile(chunk, "r").use { input ->
             input.seek(info.dataOffset)
             var remaining = info.dataBytes
@@ -322,6 +391,21 @@ private class Pcm16WaveAppender(private val destination: File) : AutoCloseable {
                 remaining -= count
             }
         }
+        if (missingFrames > 0L) {
+            var remainingBytes = missingFrames * bytesPerFrame
+            val zeros = ByteArray(64 * 1024)
+            while (remainingBytes > 0L) {
+                val count = minOf(zeros.size.toLong(), remainingBytes).toInt()
+                output.write(zeros, 0, count)
+                dataBytes += count
+                remainingBytes -= count
+            }
+        }
+    }
+
+    private fun mapFrame(frame: Long, sourceRate: Int, targetRate: Int): Long {
+        val numerator = frame * targetRate.toLong()
+        return (numerator + sourceRate.toLong() / 2L) / sourceRate.toLong()
     }
 
     override fun close() {

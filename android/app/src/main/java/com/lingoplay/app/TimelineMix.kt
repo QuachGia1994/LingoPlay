@@ -182,11 +182,11 @@ object TimelineMixService {
         backgroundAudioFile: File?,
         destination: File,
     ) {
-        val extractor = if (backgroundAudioFile != null) {
-            MediaExtractor().apply { setDataSource(backgroundAudioFile.absolutePath) }
-        } else {
-            openExtractor(context, media.uri)
+        if (backgroundAudioFile != null) {
+            renderSeparatedWaveBackground(context, media, dub, mode, backgroundAudioFile, destination)
+            return
         }
+        val extractor = openExtractor(context, media.uri)
         val audioTrack = (0 until extractor.trackCount).firstOrNull { index ->
             extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
         } ?: error("The source video has no readable audio track.")
@@ -349,6 +349,122 @@ object TimelineMixService {
             if (!destination.exists() || destination.length() == 0L) destination.delete()
         }
         check(destination.isFile && destination.length() > 0L) { "Mixed AAC audio export produced no output." }
+    }
+
+    private fun renderSeparatedWaveBackground(
+        context: Context,
+        media: LocalMediaItem,
+        dub: DubSpeechDocument,
+        mode: DubbingModePreset,
+        backgroundAudioFile: File,
+        destination: File,
+    ) {
+        val wav = readWavInfo(backgroundAudioFile)
+        require(wav.audioFormat == 1 && wav.bitsPerSample == 16) {
+            "Clean Background accompaniment must be PCM16 WAV."
+        }
+        require(wav.channels in 1..2) { "Clean Background accompaniment must be mono or stereo PCM." }
+        val targetChannels = wav.channels
+        val encoderChoice = chooseAacEncoder(wav.sampleRate, targetChannels)
+        val targetRate = encoderChoice.sampleRate
+        val encoder = StreamingAacEncoder(
+            codecName = encoderChoice.codecName,
+            destination = destination,
+            sampleRate = targetRate,
+            channels = targetChannels,
+        )
+        val clipCache = SpeechClipCache(dub.segments)
+        val sourceStartUs = originalAudioStartUs(context, media.uri)
+        var timelineCursorUs = 0L
+        var sourceFramesRead = 0L
+        try {
+            if (sourceStartUs > 0L) {
+                queueSilenceRange(
+                    encoder = encoder,
+                    clipCache = clipCache,
+                    dub = dub,
+                    startUs = 0L,
+                    endUs = sourceStartUs,
+                    sampleRate = targetRate,
+                    channels = targetChannels,
+                    mode = mode,
+                )
+                timelineCursorUs = sourceStartUs
+            }
+            RandomAccessFile(backgroundAudioFile, "r").use { input ->
+                input.seek(wav.dataOffset)
+                var remaining = wav.dataSize
+                val framesPerBlock = max(1, wav.sampleRate / 5)
+                val bytesPerFrame = wav.channels * 2
+                val buffer = ByteArray(framesPerBlock * bytesPerFrame)
+                while (remaining >= bytesPerFrame.toLong()) {
+                    val requested = minOf(buffer.size.toLong(), remaining).toInt()
+                    val aligned = requested - (requested % bytesPerFrame)
+                    if (aligned <= 0) break
+                    input.readFully(buffer, 0, aligned)
+                    remaining -= aligned.toLong()
+                    val shorts = ByteBuffer.wrap(buffer, 0, aligned)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .asShortBuffer()
+                    val raw = ShortArray(shorts.remaining()).also(shorts::get)
+                    val normalized = if (wav.sampleRate == targetRate) {
+                        raw
+                    } else {
+                        resampleInterleaved(raw, wav.sampleRate, targetRate, targetChannels)
+                    }
+                    val startUs = sourceStartUs + sourceFramesRead * 1_000_000L / wav.sampleRate.toLong()
+                    mixOriginalAndSpeech(
+                        pcm = normalized,
+                        startUs = startUs,
+                        sampleRate = targetRate,
+                        channels = targetChannels,
+                        dub = dub,
+                        clipCache = clipCache,
+                        mode = mode,
+                    )
+                    encoder.queuePcm(normalized, startUs)
+                    val sourceFrames = aligned / bytesPerFrame
+                    sourceFramesRead += sourceFrames.toLong()
+                    val outputFrames = normalized.size / targetChannels
+                    timelineCursorUs = max(
+                        timelineCursorUs,
+                        startUs + outputFrames * 1_000_000L / targetRate.toLong(),
+                    )
+                }
+            }
+            val mediaEndUs = TimelinePlacementPolicy.outputDurationMs(media.durationMs, dub.segments) * 1_000L
+            if (timelineCursorUs < mediaEndUs) {
+                queueSilenceRange(
+                    encoder = encoder,
+                    clipCache = clipCache,
+                    dub = dub,
+                    startUs = timelineCursorUs,
+                    endUs = mediaEndUs,
+                    sampleRate = targetRate,
+                    channels = targetChannels,
+                    mode = mode,
+                )
+                timelineCursorUs = mediaEndUs
+            }
+            encoder.finish(timelineCursorUs)
+        } finally {
+            encoder.closeQuietly()
+            if (!destination.exists() || destination.length() == 0L) destination.delete()
+        }
+        check(destination.isFile && destination.length() > 0L) { "Mixed Clean Background AAC export produced no output." }
+    }
+
+    internal fun originalAudioStartUs(context: Context, sourceUri: Uri): Long {
+        val extractor = openExtractor(context, sourceUri)
+        return try {
+            val audioTrack = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return 0L
+            extractor.selectTrack(audioTrack)
+            extractor.sampleTime.coerceAtLeast(0L)
+        } finally {
+            extractor.release()
+        }
     }
 
     private fun mixOriginalAndSpeech(

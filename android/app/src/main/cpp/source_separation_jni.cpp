@@ -109,8 +109,12 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_lingoplay_app_SourceSeparationNative_nativeSeparateChunk(
     JNIEnv* env, jclass, jstring vocals_model, jstring accompaniment_model,
     jfloatArray planar_stereo, jint frames, jint sample_rate,
+    jlong process_start_frame, jlong core_start_frame, jint core_frames,
     jstring vocals_output, jstring accompaniment_output) {
-  if (frames <= 0 || sample_rate <= 0 || planar_stereo == nullptr) return JNI_FALSE;
+  if (frames <= 0 || sample_rate <= 0 || core_frames <= 0 || planar_stereo == nullptr) {
+    return JNI_FALSE;
+  }
+  if (process_start_frame < 0 || core_start_frame < process_start_frame) return JNI_FALSE;
   if (env->GetArrayLength(planar_stereo) != frames * 2) return JNI_FALSE;
 
   UtfChars vocals_model_path(env, vocals_model);
@@ -151,30 +155,54 @@ Java_com_lingoplay_app_SourceSeparationNative_nativeSeparateChunk(
       api.process(separator, channels, 2, frames, sample_rate);
   env->ReleaseFloatArrayElements(planar_stereo, samples, JNI_ABORT);
 
-  if (output == nullptr || output->num_stems < 2 || output->sample_rate <= 0) {
+  if (output == nullptr || output->num_stems != 2 || output->sample_rate <= 0) {
     if (output != nullptr) api.destroy_output(output);
     api.destroy(separator);
-    LogError("Spleeter returned no two-stem output");
+    LogError("Spleeter returned an invalid two-stem contract");
     return JNI_FALSE;
   }
 
-  const int64_t expected_frames64 = static_cast<int64_t>(std::llround(
-      static_cast<double>(frames) * static_cast<double>(output->sample_rate) /
-      static_cast<double>(sample_rate)));
+  const auto map_frame = [sample_rate, output](int64_t frame) -> int64_t {
+    return static_cast<int64_t>(std::llround(
+        static_cast<double>(frame) * static_cast<double>(output->sample_rate) /
+        static_cast<double>(sample_rate)));
+  };
+  const int64_t process_output_start = map_frame(process_start_frame);
+  const int64_t core_output_start = map_frame(core_start_frame);
+  const int64_t core_output_end = map_frame(core_start_frame + core_frames);
+  const int64_t crop_start = core_output_start - process_output_start;
+  const int64_t expected_core_frames = core_output_end - core_output_start;
+  if (crop_start < 0 || expected_core_frames <= 0) {
+    api.destroy_output(output);
+    api.destroy(separator);
+    return JNI_FALSE;
+  }
+
   bool ok = true;
   const char* paths[2] = {vocals_output_path.get(), accompaniment_output_path.get()};
   for (int stem_index = 0; stem_index < 2; ++stem_index) {
     const SherpaOnnxSourceSeparationStem& stem = output->stems[stem_index];
-    if (stem.samples == nullptr || stem.num_channels <= 0 || stem.n <= 0) {
+    if (stem.samples == nullptr || stem.num_channels <= 0 || stem.n <= 0 ||
+        crop_start >= stem.n) {
       ok = false;
       break;
     }
-    const int32_t frames_to_write = static_cast<int32_t>(std::min<int64_t>(
-        stem.n, std::max<int64_t>(1, expected_frames64)));
+    const int64_t available = static_cast<int64_t>(stem.n) - crop_start;
+    const int32_t frames_to_write = static_cast<int32_t>(
+        std::min<int64_t>(available, expected_core_frames));
+    if (frames_to_write <= 0) {
+      ok = false;
+      break;
+    }
     std::vector<const float*> stem_samples(static_cast<size_t>(stem.num_channels));
     for (int32_t channel = 0; channel < stem.num_channels; ++channel) {
-      stem_samples[static_cast<size_t>(channel)] = stem.samples[channel];
+      if (stem.samples[channel] == nullptr) {
+        ok = false;
+        break;
+      }
+      stem_samples[static_cast<size_t>(channel)] = stem.samples[channel] + crop_start;
     }
+    if (!ok) break;
     if (api.write_wave(stem_samples.data(), frames_to_write, output->sample_rate,
                        stem.num_channels, paths[stem_index]) != 1) {
       ok = false;

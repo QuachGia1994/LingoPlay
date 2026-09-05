@@ -19,13 +19,24 @@ internal object SourceSeparationManifest {
     const val archiveRoot = "sherpa-onnx-spleeter-2stems-fp16"
     const val archiveName = "$archiveRoot.tar.bz2"
     const val archiveBytes = 35_271_738L
-    const val archiveSha256 = "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6"
+    const val archiveSha256 = "d54561979bd2e08a51e7dbd99ac36bb47564e089eefd403636dbca93e811bba2"
+    const val previousArchiveSha256 = "c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6"
     const val vocalsName = "vocals.fp16.onnx"
+    const val vocalsBytes = 19_681_017L
+    const val vocalsSha256 = "24cef84aedcd1fe87c0b743ef3370ad34dc1fabf6c9014d6128a75a538c7b668"
     const val accompanimentName = "accompaniment.fp16.onnx"
+    const val accompanimentBytes = 19_681_024L
+    const val accompanimentSha256 = "d14cea55793cc531a5875f5f4da08207d1c5ab9292e8e0099a104eecb014fcc0"
     const val archiveUrl =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/$archiveName"
 
     val archiveSpec = ModelFileSpec(archiveName, archiveUrl, archiveBytes, archiveSha256)
+    val acceptedArchiveSha256 = setOf(archiveSha256, previousArchiveSha256)
+    val vocalsSpec = ModelFileSpec(vocalsName, "", vocalsBytes, vocalsSha256)
+    val accompanimentSpec = ModelFileSpec(accompanimentName, "", accompanimentBytes, accompanimentSha256)
+
+    fun archiveMatches(file: File): Boolean =
+        file.isFile && file.length() == archiveBytes && ModelIntegrity.sha256(file) in acceptedArchiveSha256
 }
 
 internal object SourceSeparationArchivePolicy {
@@ -63,12 +74,21 @@ object SourceSeparationModelStore {
 
     internal fun validatedModel(root: File): SpleeterSourceSeparationModel? {
         val marker = File(root, "pack.sha256")
-        if (marker.takeIf(File::isFile)?.readText()?.trim() != SourceSeparationManifest.archiveSha256) return null
+        if (marker.takeIf(File::isFile)?.readText()?.trim() !in SourceSeparationManifest.acceptedArchiveSha256) return null
         val vocals = File(root, SourceSeparationManifest.vocalsName)
         val accompaniment = File(root, SourceSeparationManifest.accompanimentName)
-        if (!vocals.isFile || vocals.length() <= 0L || !accompaniment.isFile || accompaniment.length() <= 0L) return null
+        if (!vocals.isFile || vocals.length() != SourceSeparationManifest.vocalsBytes ||
+            !accompaniment.isFile || accompaniment.length() != SourceSeparationManifest.accompanimentBytes
+        ) return null
         return SpleeterSourceSeparationModel(vocals, accompaniment)
     }
+
+    internal fun contentHashesMatch(root: File): Boolean =
+        ModelIntegrity.matches(File(root, SourceSeparationManifest.vocalsName), SourceSeparationManifest.vocalsSpec) &&
+            ModelIntegrity.matches(
+                File(root, SourceSeparationManifest.accompanimentName),
+                SourceSeparationManifest.accompanimentSpec,
+            )
 }
 
 object SourceSeparationModelInstaller {
@@ -100,12 +120,12 @@ object SourceSeparationModelInstaller {
         val root = File(context.filesDir, rootPath).apply { mkdirs() }
         val archive = File(root, SourceSeparationManifest.archiveName)
         val part = File(root, "${SourceSeparationManifest.archiveName}.part")
-        if (archive.exists() && !ModelIntegrity.matches(archive, SourceSeparationManifest.archiveSpec)) archive.delete()
+        if (archive.exists() && !SourceSeparationManifest.archiveMatches(archive)) archive.delete()
         if (part.length() > SourceSeparationManifest.archiveBytes ||
-            (part.length() == SourceSeparationManifest.archiveBytes && !ModelIntegrity.matches(part, SourceSeparationManifest.archiveSpec))
+            (part.length() == SourceSeparationManifest.archiveBytes && !SourceSeparationManifest.archiveMatches(part))
         ) part.delete()
 
-        val verified = ModelIntegrity.matches(archive, SourceSeparationManifest.archiveSpec)
+        val verified = SourceSeparationManifest.archiveMatches(archive)
         val current = if (verified) SourceSeparationManifest.archiveBytes else part.length().coerceAtLeast(0L)
         ensureStorage(context, SourceSeparationManifest.archiveBytes - current)
         onProgress(ModelInstallState.Downloading(current, SourceSeparationManifest.archiveBytes))
@@ -115,9 +135,14 @@ object SourceSeparationModelInstaller {
                 currentCoroutineContext().ensureActive()
                 onProgress(ModelInstallState.Downloading(bytes, SourceSeparationManifest.archiveBytes))
             }
-            if (!ModelIntegrity.matches(part, SourceSeparationManifest.archiveSpec)) {
+            if (!SourceSeparationManifest.archiveMatches(part)) {
+                val actualBytes = part.length()
+                val actualSha256 = part.takeIf(File::isFile)?.let(ModelIntegrity::sha256).orEmpty()
                 part.delete()
-                error("Clean Background model failed integrity verification.")
+                error(
+                    "Clean Background model failed integrity verification " +
+                        "(bytes=$actualBytes, sha256=$actualSha256).",
+                )
             }
             if (archive.exists() && !archive.delete()) error("Unable to replace Clean Background archive.")
             if (!part.renameTo(archive)) error("Unable to prepare Clean Background archive.")
@@ -129,7 +154,10 @@ object SourceSeparationModelInstaller {
         if (!staging.mkdirs() && !staging.isDirectory) error("Unable to create Clean Background staging directory.")
         try {
             extractVerifiedArchive(archive, staging)
-            File(staging, "pack.sha256").writeText(SourceSeparationManifest.archiveSha256)
+            if (!SourceSeparationModelStore.contentHashesMatch(staging)) {
+                error("Clean Background extracted models failed exact size/SHA-256 verification.")
+            }
+            File(staging, "pack.sha256").writeText(ModelIntegrity.sha256(archive))
             SourceSeparationModelStore.validatedModel(staging)
                 ?: error("The verified Clean Background archive is incomplete.")
             if (versionDir.exists() && !versionDir.deleteRecursively()) error("Unable to replace Clean Background model.")

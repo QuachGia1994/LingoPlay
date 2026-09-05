@@ -34,7 +34,7 @@ Upstream model examples/releases: https://github.com/k2-fsa/sherpa-onnx
 
 ### Stage 20 Spleeter two-stem source-separation model pack
 
-The optional Clean Background feature downloads sherpa-onnx release artifact `sherpa-onnx-spleeter-2stems-fp16.tar.bz2` only after explicit user action. LingoPlay pins the archive at 35,271,738 bytes with SHA-256 `c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6`; it is not bundled in the base application. Separation runs locally, produces transient vocals/accompaniment stems for the current processing run, and does not upload user audio.
+The optional Clean Background feature downloads sherpa-onnx release artifact `sherpa-onnx-spleeter-2stems-fp16.tar.bz2` only after explicit user action. The currently served GitHub release archive is 35,271,738 bytes with SHA-256 `d54561979bd2e08a51e7dbd99ac36bb47564e089eefd403636dbca93e811bba2`; LingoPlay also recognizes the previously published archive digest `c6c5c4307673bc6813ddf58d4efdff57c26d2dfc3f25b05c7a32db453d70aca6` only when the extracted models match the separately pinned official model hashes. The artifact is not bundled in the base application. Separation runs locally, produces transient vocals/accompaniment stems for the current processing run, and does not upload user audio.
 
 Spleeter source is published by Deezer under the MIT License. LingoPlay uses the sherpa-onnx converted/runtime-compatible model path and retains sherpa-onnx's Apache-2.0 runtime notice separately above.
 

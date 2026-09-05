@@ -315,9 +315,19 @@ final class TimelineMixService {
         }
         let sourceDuration = try await source.load(.duration)
         let sourceAudioRange = try await sourceAudioTrack.load(.timeRange)
+        let backgroundInsertStart: CMTime
+        if backgroundAudioURL != nil {
+            guard let originalAudioTrack = try await source.loadTracks(withMediaType: .audio).first else {
+                throw TimelineMixError.noOriginalAudioTrack
+            }
+            let originalRange = try await originalAudioTrack.load(.timeRange)
+            backgroundInsertStart = CMTimeMaximum(.zero, originalRange.start)
+        } else {
+            backgroundInsertStart = sourceAudioRange.start
+        }
         let sourceAudioDuration = CMTimeMinimum(
             sourceAudioRange.duration,
-            CMTimeMaximum(.zero, CMTimeSubtract(sourceDuration, sourceAudioRange.start))
+            CMTimeMaximum(.zero, CMTimeSubtract(sourceDuration, backgroundInsertStart))
         )
         let dubAsset = AVURLAsset(url: dubbedAudioURL)
         guard let dubTrack = try await dubAsset.loadTracks(withMediaType: .audio).first else {
@@ -339,7 +349,7 @@ final class TimelineMixService {
             try outputOriginalTrack.insertTimeRange(
                 CMTimeRange(start: sourceAudioRange.start, duration: sourceAudioDuration),
                 of: sourceAudioTrack,
-                at: sourceAudioRange.start
+                at: backgroundInsertStart
             )
         }
         try outputDubTrack.insertTimeRange(
@@ -348,7 +358,7 @@ final class TimelineMixService {
             at: .zero
         )
         let mixedDuration = CMTimeMaximum(sourceDuration, dubDuration)
-        let sourceAudioEnd = CMTimeAdd(sourceAudioRange.start, sourceAudioDuration)
+        let sourceAudioEnd = CMTimeAdd(backgroundInsertStart, sourceAudioDuration)
         if CMTimeCompare(mixedDuration, sourceAudioEnd) > 0 {
             outputOriginalTrack.insertEmptyTimeRange(CMTimeRange(
                 start: sourceAudioEnd,
